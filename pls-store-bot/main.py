@@ -10,7 +10,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.filters import Command, CommandStart
 from aiogram.types import (
-    Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton,
+    Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile,
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -25,6 +25,7 @@ ADMIN_ID_RAW = os.getenv("ADMIN_ID", "").strip()
 SUPPORT_USERNAME = os.getenv("SUPPORT_USERNAME", "").strip().lstrip("@")
 REVIEWS_URL = os.getenv("REVIEWS_URL", "").strip()
 DB_PATH = Path(os.getenv("DB_PATH", "data/store.db"))
+BANNER_PATH = Path(os.getenv("BANNER_PATH", "assets/banner.png"))
 
 if not BOT_TOKEN:
     raise RuntimeError("Не задана переменная окружения BOT_TOKEN")
@@ -105,14 +106,30 @@ def get_order_count(user_id: int) -> int:
 
 async def show_home(target, first_name: str):
     text = (
-        "<b>PLS Store</b>\n"
-        "Плагины и дополнения для FunPayCardinal\n\n"
+        "<b>PLS Store</b>\\n"
+        "Плагины и дополнения для FunPayCardinal\\n\\n"
         f"Добро пожаловать, {html.escape(first_name)}!"
     )
+
+    # Главный экран отправляется фотографией с подписью и меню.
     if isinstance(target, Message):
-        await target.answer(text, reply_markup=main_menu())
+        message = target
     else:
-        await target.message.edit_text(text, reply_markup=main_menu())
+        message = target.message
+        try:
+            await message.delete()
+        except Exception:
+            log.warning("Не удалось удалить предыдущее сообщение главного меню")
+
+    if BANNER_PATH.is_file():
+        await message.answer_photo(
+            photo=FSInputFile(BANNER_PATH),
+            caption=text,
+            reply_markup=main_menu(),
+        )
+    else:
+        log.warning("Баннер не найден: %s", BANNER_PATH)
+        await message.answer(text, reply_markup=main_menu())
 
 
 dp = Dispatcher()
