@@ -10,7 +10,11 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.filters import Command, CommandStart
 from aiogram.types import (
-    Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile,
+    Message,
+    CallbackQuery,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+    FSInputFile,
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -108,6 +112,38 @@ def get_order_count(user_id: int) -> int:
         return int(row["total"])
 
 
+async def safe_edit_or_send(
+    callback: CallbackQuery,
+    text: str,
+    reply_markup: InlineKeyboardMarkup | None = None,
+) -> None:
+    """
+    Безопасно показывает текстовый экран.
+    Если предыдущее сообщение — фото (главное меню), удаляем его и шлём новое.
+    Иначе пробуем edit_text, при неудаче — удаляем и шлём новое.
+    """
+    message = callback.message
+    has_photo = bool(getattr(message, "photo", None))
+
+    if has_photo:
+        try:
+            await message.delete()
+        except Exception:
+            log.warning("Не удалось удалить фото-сообщение")
+        await message.answer(text, reply_markup=reply_markup)
+        return
+
+    try:
+        await message.edit_text(text, reply_markup=reply_markup)
+    except Exception as exc:
+        log.warning("edit_text не удался, отправляю новое сообщение: %s", exc)
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        await message.answer(text, reply_markup=reply_markup)
+
+
 async def show_home(target, first_name: str):
     text = (
         "<b>PLS Store</b>\n"
@@ -115,7 +151,6 @@ async def show_home(target, first_name: str):
         f"Добро пожаловать, {html.escape(first_name)}!"
     )
 
-    # Главный экран отправляется фотографией с подписью и меню.
     if isinstance(target, Message):
         message = target
     else:
@@ -155,7 +190,8 @@ async def cb_catalog(callback: CallbackQuery):
     await callback.answer()
     products = get_products()
     if not products:
-        await callback.message.edit_text(
+        await safe_edit_or_send(
+            callback,
             "🛒 <b>Каталог PLS Store</b>\n\n"
             "Пока товаров нет. Загляни позже или напиши в поддержку.",
             reply_markup=back_menu(),
@@ -169,7 +205,8 @@ async def cb_catalog(callback: CallbackQuery):
     builder.button(text="⬅️ Главное меню", callback_data="home")
     builder.adjust(1)
 
-    await callback.message.edit_text(
+    await safe_edit_or_send(
+        callback,
         "🛒 <b>Каталог PLS Store</b>\n\nВыбери интересующий плагин:",
         reply_markup=builder.as_markup(),
     )
@@ -184,7 +221,11 @@ async def cb_product(callback: CallbackQuery):
         return
     product = get_product(product_id)
     if not product:
-        await callback.message.edit_text("Этот товар больше недоступен.", reply_markup=back_menu())
+        await safe_edit_or_send(
+            callback,
+            "Этот товар больше недоступен.",
+            reply_markup=back_menu(),
+        )
         return
 
     text = (
@@ -198,7 +239,7 @@ async def cb_product(callback: CallbackQuery):
         [InlineKeyboardButton(text="⬅️ Назад в каталог", callback_data="catalog")],
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="home")],
     ])
-    await callback.message.edit_text(text, reply_markup=keyboard)
+    await safe_edit_or_send(callback, text, reply_markup=keyboard)
 
 
 @dp.callback_query(F.data.startswith("buy:"))
@@ -210,7 +251,11 @@ async def cb_buy(callback: CallbackQuery, bot: Bot):
         return
     product = get_product(product_id)
     if not product:
-        await callback.message.edit_text("Этот товар больше недоступен.", reply_markup=back_menu())
+        await safe_edit_or_send(
+            callback,
+            "Этот товар больше недоступен.",
+            reply_markup=back_menu(),
+        )
         return
 
     user = callback.from_user
@@ -222,7 +267,8 @@ async def cb_buy(callback: CallbackQuery, bot: Bot):
         )
         order_id = cursor.lastrowid
 
-    await callback.message.edit_text(
+    await safe_edit_or_send(
+        callback,
         "✅ <b>Заявка отправлена!</b>\n\n"
         "Продавец получил уведомление и свяжется с тобой для оформления покупки.\n"
         "Оплата и передача товара согласовываются вручную.",
@@ -249,7 +295,8 @@ async def cb_profile(callback: CallbackQuery):
     user = callback.from_user
     username = f"@{user.username}" if user.username else "не указан"
     orders = get_order_count(user.id)
-    await callback.message.edit_text(
+    await safe_edit_or_send(
+        callback,
         "👤 <b>Твой профиль</b>\n\n"
         f"Имя: {html.escape(user.full_name)}\n"
         f"Username: {html.escape(username)}\n"
@@ -271,7 +318,7 @@ async def cb_reviews(callback: CallbackQuery):
     else:
         keyboard = back_menu()
         text = "⭐ Ссылка на канал с отзывами пока не настроена."
-    await callback.message.edit_text(text, reply_markup=keyboard)
+    await safe_edit_or_send(callback, text, reply_markup=keyboard)
 
 
 @dp.callback_query(F.data == "support")
@@ -286,7 +333,7 @@ async def cb_support(callback: CallbackQuery):
     else:
         keyboard = back_menu()
         text = "💬 Поддержка пока не настроена. Скоро здесь появится контакт."
-    await callback.message.edit_text(text, reply_markup=keyboard)
+    await safe_edit_or_send(callback, text, reply_markup=keyboard)
 
 
 @dp.message(Command("addproduct"))
@@ -350,7 +397,10 @@ async def cmd_reply(message: Message, bot: Bot):
         await message.answer("Формат: <code>/reply TELEGRAM_ID текст</code>")
         return
     try:
-        await bot.send_message(int(parts[1]), "💬 <b>Сообщение от поддержки PLS Store</b>\n\n" + html.escape(parts[2]))
+        await bot.send_message(
+            int(parts[1]),
+            "💬 <b>Сообщение от поддержки PLS Store</b>\n\n" + html.escape(parts[2]),
+        )
         await message.answer("✅ Сообщение отправлено.")
     except Exception as exc:
         log.warning("Не удалось отправить ответ: %s", exc)
