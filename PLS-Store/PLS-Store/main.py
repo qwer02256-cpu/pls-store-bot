@@ -78,7 +78,8 @@ def init_db():
                 name TEXT NOT NULL,
                 price TEXT NOT NULL,
                 description TEXT NOT NULL,
-                active INTEGER NOT NULL DEFAULT 1
+                active INTEGER NOT NULL DEFAULT 1,
+                image_path TEXT
             )
         """)
         conn.execute("""
@@ -90,6 +91,11 @@ def init_db():
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        # Миграция существующей базы: добавляем поле изображения товара.
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(products)").fetchall()}
+        if "image_path" not in columns:
+            conn.execute("ALTER TABLE products ADD COLUMN image_path TEXT")
+
         # Если каталог пуст — кладём стартовые товары (в т.ч. Ch AutoDelivery)
         count = conn.execute("SELECT COUNT(*) AS c FROM products").fetchone()["c"]
         if count == 0:
@@ -127,7 +133,7 @@ def get_products():
 def get_product(product_id: int):
     with db() as conn:
         return conn.execute(
-            "SELECT id, name, price, description FROM products WHERE id=? AND active=1",
+            "SELECT id, name, price, description, image_path FROM products WHERE id=? AND active=1",
             (product_id,),
         ).fetchone()
 
@@ -267,6 +273,23 @@ async def cb_product(callback: CallbackQuery):
         [InlineKeyboardButton(text="⬅️ Назад в каталог", callback_data="catalog")],
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="home")],
     ])
+    image_path = product["image_path"]
+    if image_path:
+        image_file = Path(image_path)
+        if not image_file.is_absolute():
+            image_file = _BASE_DIR / image_file
+        if image_file.is_file():
+            try:
+                await callback.message.delete()
+            except Exception:
+                pass
+            await callback.message.answer_photo(
+                photo=FSInputFile(image_file),
+                caption=text,
+                reply_markup=keyboard,
+            )
+            return
+
     await safe_edit_or_send(callback, text, reply_markup=keyboard)
 
 
@@ -382,6 +405,41 @@ async def cmd_add_product(message: Message):
         )
         product_id = cursor.lastrowid
     await message.answer(f"✅ Товар добавлен. ID: <code>{product_id}</code>")
+
+
+@dp.message(F.photo)
+async def cmd_set_product_image(message: Message, bot: Bot):
+    """Администратор отправляет фото с подписью /setproductimage ID."""
+    if message.from_user.id != ADMIN_ID:
+        return
+    caption = (message.caption or "").strip().split()
+    if len(caption) != 2 or caption[0].lower() != "/setproductimage" or not caption[1].isdigit():
+        return
+
+    product_id = int(caption[1])
+    with db() as conn:
+        product = conn.execute(
+            "SELECT id FROM products WHERE id=? AND active=1", (product_id,)
+        ).fetchone()
+    if not product:
+        await message.answer("Товар с таким ID не найден. Посмотреть ID можно командой /products.")
+        return
+
+    products_dir = _BASE_DIR / "assets" / "products"
+    products_dir.mkdir(parents=True, exist_ok=True)
+    destination = products_dir / f"product_{product_id}.jpg"
+    photo_file = await bot.get_file(message.photo[-1].file_id)
+    await bot.download_file(photo_file.file_path, destination=destination)
+
+    relative_path = destination.relative_to(_BASE_DIR).as_posix()
+    with db() as conn:
+        conn.execute(
+            "UPDATE products SET image_path=? WHERE id=?", (relative_path, product_id)
+        )
+    await message.answer(
+        f"✅ Изображение сохранено для товара ID <code>{product_id}</code>. "
+        "Открой карточку товара в каталоге, чтобы проверить."
+    )
 
 
 @dp.message(Command("delproduct"))
