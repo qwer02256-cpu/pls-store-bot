@@ -96,15 +96,18 @@ def init_db() -> None:
                 user_id INTEGER NOT NULL,
                 amount REAL NOT NULL,
                 currency TEXT NOT NULL DEFAULT 'RUB',
-                platega_id TEXT UNIQUE,
+                platega_id TEXT,
                 status TEXT NOT NULL DEFAULT 'PENDING',
                 payload TEXT,
                 redirect_url TEXT,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                confirmed_at TEXT,
-                UNIQUE(platega_id)
+                confirmed_at TEXT
             )
         """)
+        try:
+            conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_platega ON payments(platega_id)")
+        except Exception:
+            pass
         conn.execute("""
             CREATE TABLE IF NOT EXISTS purchases (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -291,3 +294,27 @@ def parse_price_rub(price_str: str, product_row: Any = None) -> float:
     if m:
         return float(m.group(1))
     return 0.0
+
+
+def get_products(active_only: bool = True):
+    with db() as conn:
+        if active_only:
+            return conn.execute(
+                "SELECT * FROM products WHERE active=1 ORDER BY sort_order, id"
+            ).fetchall()
+        return conn.execute("SELECT * FROM products ORDER BY sort_order, id").fetchall()
+
+
+def get_product(product_id: int):
+    with db() as conn:
+        row = conn.execute("SELECT * FROM products WHERE id=?", (product_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def get_faq(active_only: bool = True):
+    with db() as conn:
+        if active_only:
+            return conn.execute(
+                "SELECT * FROM faq WHERE active=1 ORDER BY sort_order, id"
+            ).fetchall()
+        return conn.execute("SELECT * FROM faq ORDER BY sort_order, id").fetchall()
