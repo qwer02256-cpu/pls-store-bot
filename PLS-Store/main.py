@@ -818,48 +818,62 @@ async def process_confirmed_payment(tx_id: str, data: dict, bot: Bot) -> bool:
     return True
 
 
-# ─── FAQ ────────────────────────────────────────────────────────────────────
+# ─── FAQ / documents ────────────────────────────────────────────────────────
+DOCUMENTS = [
+    ("🔒 Политика конфиденциальности", "https://telegra.ph/Politika-konfidencialnosti-PLS-STORE-11-07"),
+    ("📜 Пользовательское соглашение", "https://telegra.ph/Polzovatelskoe-soglashenie-PLS-STORE-11-07"),
+    ("💵 Товары и тарифы", "https://telegra.ph/Tovary-i-tarify-PLS-STORE-11-07"),
+]
+
+
+def documents_keyboard() -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text=title, url=url)]
+        for title, url in DOCUMENTS
+    ]
+    rows.extend([
+        [InlineKeyboardButton(text="🎧 Поддержка", callback_data="support")],
+        [InlineKeyboardButton(text=btn("btn_back", "⬅️ Назад"), callback_data="faq")],
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 @dp.callback_query(F.data == "faq")
 async def cb_faq(callback: CallbackQuery):
     await callback.answer()
-    items = get_faq()
-    if not items:
-        text = f"<b>{btn('faq_title', '❓ FAQ')}</b>\n\nПока вопросов нет."
-        markup = back_kb("home")
-    else:
-        builder = InlineKeyboardBuilder()
-        for item in items:
-            builder.button(text=item["question"][:60], callback_data=f"faqitem:{item['id']}")
-        builder.button(text=btn("btn_back", "⬅️ Назад"), callback_data="home")
-        builder.adjust(1)
-        text = f"<b>{btn('faq_title', '❓ FAQ — частые вопросы')}</b>\n\nВыберите вопрос:"
-        markup = builder.as_markup()
-    photo = banner_path("faq")
-    await safe_edit_or_send(callback, text, reply_markup=markup, photo=photo)
+    text = (
+        f"<b>{btn('faq_title', '❓ FAQ — частые вопросы')}</b>\n\n"
+        "🗓 <b>Как купить?</b>\n"
+        "Профиль → «Пополнить», затем Магазин → выберите товар → оплата с баланса.\n\n"
+        "💲 <b>Чем платить?</b>\n"
+        "СБП (оплата из приложения банка) и криптовалюта (USDT) через CryptoBot, xRocket и Binance. Баланс зачисляется автоматически.\n\n"
+        "🚀 <b>Когда придёт товар?</b>\n"
+        "Сразу после оплаты — выдача автоматическая. Товар всегда в Профиль → 🛒 Покупки, можно забрать повторно.\n\n"
+        "☑️ <b>Гарантия и замена?</b>\n"
+        "По вопросам замены и гарантии — в поддержку.\n\n"
+        "🎧 <b>Поддержка</b>\n"
+        "Кнопка «Поддержка» в главном меню."
+    )
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📄 Документы", callback_data="documents")],
+        [InlineKeyboardButton(text=btn("btn_back", "⬅️ Назад"), callback_data="home")],
+    ])
+    await safe_edit_or_send(callback, text, reply_markup=markup, photo=banner_path("faq"))
 
 
-@dp.callback_query(F.data.startswith("faqitem:"))
-async def cb_faq_item(callback: CallbackQuery):
+@dp.callback_query(F.data == "documents")
+async def cb_documents(callback: CallbackQuery):
     await callback.answer()
-    try:
-        fid = int(callback.data.split(":")[1])
-    except (ValueError, IndexError):
-        return
-    with db() as conn:
-        row = conn.execute("SELECT * FROM faq WHERE id=?", (fid,)).fetchone()
-    if not row:
-        await callback.message.answer("Вопрос не найден.")
-        return
-    text = f"<b>{html.escape(row['question'])}</b>\n\n{html.escape(row['answer'])}"
-    if row["link"]:
-        text += f"\n\n🔗 {html.escape(row['link'])}"
+    text = (
+        "<b>📄 Документы</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "Правила сервиса, обработка данных и актуальные цены."
+    )
     await safe_edit_or_send(
         callback,
         text,
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⬅️ К FAQ", callback_data="faq")],
-            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="home")],
-        ]),
+        reply_markup=documents_keyboard(),
+        photo=banner_path("faq"),
     )
 
 
