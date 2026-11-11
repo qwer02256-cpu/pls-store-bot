@@ -20,6 +20,8 @@ class HomeTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn('name&lt;&amp;&gt;',text)
             self.assertIn('120.5₽',text)
             self.assertNotIn('{balance}',text)
+            self.assertNotIn(' · ',text)
+            self.assertIn('FunPayCardinal',text)
 
     def test_existing_default_migrates_and_custom_greeting_survives(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(db,'DB_PATH',Path(tmp)/'store.db'):
@@ -48,6 +50,15 @@ class HomeTests(unittest.IsolatedAsyncioTestCase):
             db.init_db()
             self.assertEqual(db.get_setting('welcome_text'),'New owner greeting {balance}')
             self.assertEqual(db.get_setting('welcome_text_before_home_v2'),legacy)
+
+    def test_existing_home_footer_updates_without_resetting_greeting(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(db,'DB_PATH',Path(tmp)/'store.db'):
+            db.init_db()
+            db.set_setting('welcome_text','Hello {first_name}\nПлагины · Дополнения · FunPayCardinal')
+            db.init_db()
+            self.assertEqual(db.get_setting('welcome_text'),'Hello {first_name}\nПлагины для FunPayCardinal')
+            db.init_db()
+            self.assertEqual(db.get_setting('welcome_text'),'Hello {first_name}\nПлагины для FunPayCardinal')
 
 if __name__ == '__main__':
     unittest.main()

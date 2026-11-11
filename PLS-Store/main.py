@@ -139,7 +139,7 @@ def is_admin(user_id: int) -> bool:
 
 I18N = {
     "ru": {
-        "welcome": "<b>PLS Store</b>\n🏠 <b>Главное меню</b>\n━━━━━━━━━━━━━━━━━━━━\n\n👋 С возвращением, <b>{first_name}</b>.\n💲 Баланс: <b>{balance}₽</b>\n\nПлагины · Дополнения · FunPayCardinal",
+        "welcome": "<b>PLS Store</b>\n🏠 <b>Главное меню</b>\n━━━━━━━━━━━━━━━━━━━━\n\n👋 С возвращением, <b>{first_name}</b>.\n💲 Баланс: <b>{balance}₽</b>\n\nПлагины для FunPayCardinal",
         "license_title": "📜 <b>Лицензионное соглашение</b>\n\nПеред использованием магазина необходимо принять условия.",
         "license_accept": "Спасибо! Условия приняты.", "language_title": "<b>Выберите язык</b>",
         "language_saved": "Язык изменён на русский.", "back": "⬅️ Назад", "home": "🏠 Главное меню",
@@ -166,7 +166,7 @@ I18N = {
         "license_url": "📜 Условия лицензии", "license_accept_button": "✅ Принимаю условия",
     },
     "en": {
-        "welcome": "<b>PLS Store</b>\n🏠 <b>Main menu</b>\n━━━━━━━━━━━━━━━━━━━━\n\n👋 Welcome back, <b>{first_name}</b>.\n💲 Balance: <b>{balance}₽</b>\n\nPlugins · Add-ons · FunPayCardinal",
+        "welcome": "<b>PLS Store</b>\n🏠 <b>Main menu</b>\n━━━━━━━━━━━━━━━━━━━━\n\n👋 Welcome back, <b>{first_name}</b>.\n💲 Balance: <b>{balance}₽</b>\n\nPlugins for FunPayCardinal",
         "license_title": "📜 <b>License agreement</b>\n\nPlease accept the terms before using the store.",
         "license_accept": "Thank you! Terms accepted.", "language_title": "<b>Select language</b>",
         "language_saved": "Language changed to English.", "back": "⬅️ Back", "home": "🏠 Main menu",
@@ -194,7 +194,7 @@ I18N = {
     }
 }
 
-I18N["uk"] = {'welcome': '<b>PLS Store</b>\n🏠 <b>Головне меню</b>\n━━━━━━━━━━━━━━━━━━━━\n\n👋 З поверненням, <b>{first_name}</b>.\n💲 Баланс: <b>{balance}₽</b>\n\nПлагіни · Доповнення · FunPayCardinal',
+I18N["uk"] = {'welcome': '<b>PLS Store</b>\n🏠 <b>Головне меню</b>\n━━━━━━━━━━━━━━━━━━━━\n\n👋 З поверненням, <b>{first_name}</b>.\n💲 Баланс: <b>{balance}₽</b>\n\nПлагіни для FunPayCardinal',
  'license_title': '📜 <b>Ліцензійна угода</b>\n\nПрийміть умови, щоб користуватися магазином.',
  'license_accept': 'Дякуємо! Умови прийнято.',
  'language_title': '<b>Виберіть мову</b>',

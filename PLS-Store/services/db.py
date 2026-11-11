@@ -168,7 +168,7 @@ def init_db() -> None:
 
         # seed default design texts if missing
         defaults = {
-            "welcome_text": "<b>PLS Store</b>\n🏠 <b>Главное меню</b>\n━━━━━━━━━━━━━━━━━━━━\n\n👋 С возвращением, <b>{first_name}</b>.\n💲 Баланс: <b>{balance}₽</b>\n\nПлагины · Дополнения · FunPayCardinal",
+            "welcome_text": "<b>PLS Store</b>\n🏠 <b>Главное меню</b>\n━━━━━━━━━━━━━━━━━━━━\n\n👋 С возвращением, <b>{first_name}</b>.\n💲 Баланс: <b>{balance}₽</b>\n\nПлагины для FunPayCardinal",
             "btn_profile": "👤 Профиль",
             "btn_shop": "🛒 Магазин",
             "btn_language": "🌐 Язык",
@@ -215,6 +215,12 @@ def init_db() -> None:
                 "INSERT INTO bot_settings(key, value) VALUES ('home_welcome_layout_version', '2') "
                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value"
             )
+
+        # Refresh the previous home footer even for already migrated databases.
+        conn.execute(
+            "UPDATE bot_settings SET value=REPLACE(value, ?, ?) WHERE key='welcome_text'",
+            ("Плагины · Дополнения · FunPayCardinal", "Плагины для FunPayCardinal"),
+        )
 
         # seed FAQ if empty
         faq_count = conn.execute("SELECT COUNT(*) AS c FROM faq").fetchone()["c"]
