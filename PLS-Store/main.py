@@ -139,7 +139,7 @@ def is_admin(user_id: int) -> bool:
 
 I18N = {
     "ru": {
-        "welcome": "<b>PLS Store</b>\nПлагины и дополнения для FunPayCardinal\n\nДобро пожаловать, {first_name}!",
+        "welcome": "<b>PLS Store</b>\n🏠 <b>Главное меню</b>\n━━━━━━━━━━━━━━━━━━━━\n\n👋 С возвращением, <b>{first_name}</b>.\n💲 Баланс: <b>{balance}₽</b>\n\nПлагины · Дополнения · FunPayCardinal",
         "license_title": "📜 <b>Лицензионное соглашение</b>\n\nПеред использованием магазина необходимо принять условия.",
         "license_accept": "Спасибо! Условия приняты.", "language_title": "<b>Выберите язык</b>",
         "language_saved": "Язык изменён на русский.", "back": "⬅️ Назад", "home": "🏠 Главное меню",
@@ -166,7 +166,7 @@ I18N = {
         "license_url": "📜 Условия лицензии", "license_accept_button": "✅ Принимаю условия",
     },
     "en": {
-        "welcome": "<b>PLS Store</b>\nPlugins and add-ons for FunPayCardinal\n\nWelcome, {first_name}!",
+        "welcome": "<b>PLS Store</b>\n🏠 <b>Main menu</b>\n━━━━━━━━━━━━━━━━━━━━\n\n👋 Welcome back, <b>{first_name}</b>.\n💲 Balance: <b>{balance}₽</b>\n\nPlugins · Add-ons · FunPayCardinal",
         "license_title": "📜 <b>License agreement</b>\n\nPlease accept the terms before using the store.",
         "license_accept": "Thank you! Terms accepted.", "language_title": "<b>Select language</b>",
         "language_saved": "Language changed to English.", "back": "⬅️ Back", "home": "🏠 Main menu",
@@ -194,7 +194,7 @@ I18N = {
     }
 }
 
-I18N["uk"] = {'welcome': '<b>PLS Store</b>\nПлагіни та доповнення для FunPayCardinal\n\nЛаскаво просимо, {first_name}!',
+I18N["uk"] = {'welcome': '<b>PLS Store</b>\n🏠 <b>Головне меню</b>\n━━━━━━━━━━━━━━━━━━━━\n\n👋 З поверненням, <b>{first_name}</b>.\n💲 Баланс: <b>{balance}₽</b>\n\nПлагіни · Доповнення · FunPayCardinal',
  'license_title': '📜 <b>Ліцензійна угода</b>\n\nПрийміть умови, щоб користуватися магазином.',
  'license_accept': 'Дякуємо! Умови прийнято.',
  'language_title': '<b>Виберіть мову</b>',
@@ -442,13 +442,13 @@ async def show_license_gate(target, user_id: int) -> None:
 
 # ─── home / catalog / product ───────────────────────────────────────────────
 async def show_home(target, first_name: str):
-    lang = get_user_language(target.from_user.id if isinstance(target, CallbackQuery) else target.from_user.id)
+    user = target.from_user
+    lang = get_user_language(user.id)
+    account = ensure_user(user.id, user.username, user.first_name)
     welcome_template = get_setting("welcome_text", I18N[lang]["welcome"]) if lang == "ru" else I18N[lang]["welcome"]
-    safe_name = html.escape(first_name)
-    try:
-        text = welcome_template.replace("{first_name}", safe_name)
-    except Exception:
-        text = f"<b>PLS Store</b>\nДобро пожаловать, {safe_name}!"
+    safe_name = html.escape(user.username or first_name or user.first_name or "—")
+    balance = f"{account['balance']:.2f}".rstrip("0").rstrip(".")
+    text = welcome_template.replace("{first_name}", safe_name).replace("{balance}", balance)
     photo = banner_path("home")
     await safe_edit_or_send(target, text, reply_markup=main_menu_kb(lang), photo=photo)
 
@@ -1177,7 +1177,7 @@ async def adm_home(callback: CallbackQuery):
 
 # --- design settings ---
 DESIGN_KEYS = [
-    ("welcome_text", "Приветствие ({first_name})"),
+    ("welcome_text", "Приветствие ({first_name}, {balance})"),
     ("btn_profile", "Кнопка Профиль"),
     ("btn_shop", "Кнопка Магазин"),
     ("btn_language", "Кнопка Язык"),

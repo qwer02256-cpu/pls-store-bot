@@ -168,7 +168,7 @@ def init_db() -> None:
 
         # seed default design texts if missing
         defaults = {
-            "welcome_text": "<b>PLS Store</b>\nПлагины и дополнения для FunPayCardinal\n\nДобро пожаловать, {first_name}!",
+            "welcome_text": "<b>PLS Store</b>\n🏠 <b>Главное меню</b>\n━━━━━━━━━━━━━━━━━━━━\n\n👋 С возвращением, <b>{first_name}</b>.\n💲 Баланс: <b>{balance}₽</b>\n\nПлагины · Дополнения · FunPayCardinal",
             "btn_profile": "👤 Профиль",
             "btn_shop": "🛒 Магазин",
             "btn_language": "🌐 Язык",
@@ -187,6 +187,11 @@ def init_db() -> None:
             "referral_percent": "10",
             "min_topup": "100",
         }
+        # Upgrade only the original default, preserving owner-customized greetings.
+        conn.execute(
+            "UPDATE bot_settings SET value=? WHERE key='welcome_text' AND value=?",
+            (defaults["welcome_text"], '<b>PLS Store</b>\nПлагины и дополнения для FunPayCardinal\n\nДобро пожаловать, {first_name}!'),
+        )
         for k, v in defaults.items():
             conn.execute(
                 "INSERT OR IGNORE INTO bot_settings(key, value) VALUES (?, ?)",
