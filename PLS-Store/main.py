@@ -26,6 +26,8 @@ from aiogram.types import (
     InlineKeyboardButton,
     FSInputFile,
     BotCommand,
+    BotCommandScopeDefault,
+    BotCommandScopeChat,
     LinkPreviewOptions,
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -57,6 +59,8 @@ from services.db import (
     get_products,
     get_product,
     get_faq,
+    get_user_language,
+    set_user_language,
 )
 from services.platega import PlategaClient, PlategaError
 from services.ui import (
@@ -125,7 +129,70 @@ def seed_if_empty():
 
 # ─── helpers ────────────────────────────────────────────────────────────────
 def is_admin(user_id: int) -> bool:
-    return user_id == ADMIN_ID
+    return bool(ADMIN_ID) and user_id == ADMIN_ID
+
+
+I18N = {
+    "ru": {
+        "welcome": "<b>PLS Store</b>\nПлагины и дополнения для FunPayCardinal\n\nДобро пожаловать, {first_name}!",
+        "license_title": "📜 <b>Лицензионное соглашение</b>\n\nПеред использованием магазина необходимо принять условия.",
+        "license_accept": "Спасибо! Условия приняты.", "language_title": "🌐 <b>Выберите язык</b>\n\nЯзык сохраняется только для вашего аккаунта.",
+        "language_saved": "Язык изменён на русский.", "back": "⬅️ Назад", "home": "🏠 Главное меню",
+        "shop": "🛒 Магазин PLS Store", "no_products": "Пока товаров нет. Загляни позже или напиши в поддержку.",
+        "choose_product": "Выбери интересующий товар:", "unavailable": "Этот товар больше недоступен.",
+        "buy": "🛒 Купить за {price:.0f}₽", "manual": "📩 Оставить заявку (вручную)", "back_catalog": "⬅️ Назад в каталог",
+        "purchases": "🛒 <b>Мои покупки</b>", "empty_purchases": "Пока пусто. Загляните в магазин!",
+        "balance": "💰 Баланс", "spent": "💸 Всего потрачено", "purchase_count": "🛒 Покупок",
+        "promo_enter": "🎟 Введите промокод:", "promo_bad": "Промокод не найден или неактивен.",
+        "promo_used": "Вы уже использовали этот промокод.", "promo_limit": "Лимит использований исчерпан.",
+        "promo_ok": "✅ Промокод применён! Начислено <b>{bonus:.0f}₽</b>.",
+        "topup_title": "💳 Пополнение баланса", "topup_choose": "Выберите сумму или укажите свою.\nОплата через Platega (СБП / карты).\nСредства зачисляются автоматически после подтверждения.",
+        "topup_custom": "Введите сумму пополнения в рублях (минимум {minimum}₽):", "number": "Введите число, например 500",
+        "minimum": "Минимальная сумма: {amount:.0f}₽", "payment_unavailable": "⚠️ Платёжная система пока не настроена.",
+        "payment_error": "Ошибка создания платежа: {error}", "pay": "💳 Перейти к оплате", "check": "🔄 Проверить статус",
+        "to_profile": "⬅️ В профиль", "invoice": "💳 Счёт на <b>{amount:.0f}₽</b> создан.\nID: <code>{tx_id}</code>\n\nНажмите кнопку для оплаты. После успешной оплаты баланс пополнится автоматически.",
+        "status": "Статус платежа <code>{tx_id}</code>: <b>{status}</b>", "faq_title": "❓ FAQ — частые вопросы",
+        "faq": "🗓 <b>Как купить?</b>\nПрофиль → «Пополнить», затем Магазин → выберите товар → оплата с баланса.\n\n💲 <b>Чем платить?</b>\nСБП и доступные способы оплаты Platega. Баланс зачисляется автоматически.\n\n🚀 <b>Когда придёт товар?</b>\nПосле успешной оплаты с баланса товар появится в «Мои покупки».\n\n☑️ <b>Гарантия и замена?</b>\nПо вопросам замены и гарантии — в поддержку.\n\n🎧 <b>Поддержка</b>\nКнопка «Поддержка» в главном меню.",
+        "documents": "<b>📄 Документы</b>\n━━━━━━━━━━━━━━━━━━━━\n\nПравила сервиса, обработка данных и актуальные цены.",
+        "support": "💬 <b>Поддержка PLS Store</b>\n\nНажми кнопку ниже, чтобы написать продавцу.",
+        "support_unset": "💬 Поддержка пока не настроена.", "write_support": "💬 Написать в поддержку",
+        "reviews": "⭐ Открыть отзывы", "reviews_title": "⭐ Отзывы покупателей PLS Store", "reviews_unset": "⭐ Ссылка на отзывы пока не настроена.",
+        "api_info": "⚡ <b>API</b>\n\nРаздел API пока в разработке.\nОбратитесь в поддержку за доступом.",
+        "license_url": "📜 Условия лицензии", "license_accept_button": "✅ Принимаю условия",
+    },
+    "en": {
+        "welcome": "<b>PLS Store</b>\nPlugins and add-ons for FunPayCardinal\n\nWelcome, {first_name}!",
+        "license_title": "📜 <b>License agreement</b>\n\nPlease accept the terms before using the store.",
+        "license_accept": "Thank you! Terms accepted.", "language_title": "🌐 <b>Select language</b>\n\nYour choice is saved for your account only.",
+        "language_saved": "Language changed to English.", "back": "⬅️ Back", "home": "🏠 Main menu",
+        "shop": "🛒 PLS Store", "no_products": "There are no products yet. Please check back later or contact support.",
+        "choose_product": "Choose a product:", "unavailable": "This product is no longer available.",
+        "buy": "🛒 Buy for {price:.0f}₽", "manual": "📩 Request manually", "back_catalog": "⬅️ Back to catalog",
+        "purchases": "🛒 <b>My purchases</b>", "empty_purchases": "No purchases yet. Visit the shop!",
+        "balance": "💰 Balance", "spent": "💸 Total spent", "purchase_count": "🛒 Purchases",
+        "promo_enter": "🎟 Enter promo code:", "promo_bad": "Promo code not found or inactive.",
+        "promo_used": "You have already used this promo code.", "promo_limit": "The usage limit has been reached.",
+        "promo_ok": "✅ Promo code applied! <b>{bonus:.0f}₽</b> credited.",
+        "topup_title": "💳 Add balance", "topup_choose": "Choose an amount or enter a custom one.\nPay via Platega (bank transfer / cards).\nFunds are credited automatically after confirmation.",
+        "topup_custom": "Enter the top-up amount in RUB (minimum {minimum}₽):", "number": "Enter a number, e.g. 500",
+        "minimum": "Minimum amount: {amount:.0f}₽", "payment_unavailable": "⚠️ The payment system is not configured yet.",
+        "payment_error": "Payment creation error: {error}", "pay": "💳 Proceed to payment", "check": "🔄 Check status",
+        "to_profile": "⬅️ Profile", "invoice": "💳 Invoice for <b>{amount:.0f}₽</b> created.\nID: <code>{tx_id}</code>\n\nUse the button to pay. Your balance will be credited automatically after successful payment.",
+        "status": "Payment status <code>{tx_id}</code>: <b>{status}</b>", "faq_title": "❓ FAQ — frequently asked questions",
+        "faq": "🗓 <b>How do I buy?</b>\nOpen Profile → Add balance, then Shop → choose a product → pay using your balance.\n\n💲 <b>How can I pay?</b>\nAvailable Platega payment methods. Your balance is credited automatically.\n\n🚀 <b>When will I receive the product?</b>\nAfter a successful balance payment, the product will appear in My purchases.\n\n☑️ <b>Warranty and replacement?</b>\nContact support for warranty and replacement questions.\n\n🎧 <b>Support</b>\nUse the Support button in the main menu.",
+        "documents": "<b>📄 Documents</b>\n━━━━━━━━━━━━━━━━━━━━\n\nService rules, data processing information and current prices.",
+        "support": "💬 <b>PLS Store Support</b>\n\nPress the button below to contact the seller.",
+        "support_unset": "💬 Support has not been configured yet.", "write_support": "💬 Contact support",
+        "reviews": "⭐ Open reviews", "reviews_title": "⭐ PLS Store customer reviews", "reviews_unset": "⭐ Reviews link has not been configured yet.",
+        "api_info": "⚡ <b>API</b>\n\nThe API section is under development.\nContact support to request access.",
+        "license_url": "📜 License terms", "license_accept_button": "✅ I accept the terms",
+    }
+}
+
+def tr(user_id: int, key: str, **kwargs) -> str:
+    lang = get_user_language(user_id)
+    template = I18N.get(lang, I18N["ru"]).get(key, I18N["ru"].get(key, key))
+    return template.format(**kwargs) if kwargs else template
 
 
 def message_text_with_custom_emoji(message: Message) -> str:
@@ -209,7 +276,7 @@ async def safe_edit_or_send(target, text: str, reply_markup=None, photo: Path | 
         await message.answer(text, reply_markup=reply_markup, link_preview_options=NO_PREVIEW)
 
 
-def build_product_caption(product, *, max_desc: int = 420) -> str:
+def build_product_caption(product, *, max_desc: int = 420, lang: str = "ru") -> str:
     name = safe_stored_html(product["name"])
     desc = (product["description"] or "").strip()
     if len(desc) > max_desc:
@@ -218,10 +285,10 @@ def build_product_caption(product, *, max_desc: int = 420) -> str:
     price = html.escape(product["price"] or "")
     lines = [f"💎 <b>{name}</b>\n", f"<blockquote>{desc}</blockquote>\n"]
     if product.get("article_url"):
-        lines.append(f"📄 Статья:\n{html.escape(product['article_url'])}")
+        lines.append(f"📄 {'Article' if lang == 'en' else 'Статья'}:\n{html.escape(product['article_url'])}")
     if product.get("video_url"):
-        lines.append(f"🎥 Видео-обзор: {html.escape(product['video_url'])}")
-    lines.append(f"💰 Цена: <b>{price}</b>")
+        lines.append(f"🎥 {'Video review' if lang == 'en' else 'Видео-обзор'}: {html.escape(product['video_url'])}")
+    lines.append(f"💰 {'Price' if lang == 'en' else 'Цена'}: <b>{price}</b>")
     reviews_url = get_setting("reviews_url", REVIEWS_URL)
     reviews_label = get_setting("reviews_label", "Отзывы · Клик")
     if reviews_url:
@@ -274,45 +341,37 @@ def accept_license(user_id: int) -> None:
         )
 
 
-def license_gate_keyboard(license_url: str) -> InlineKeyboardMarkup:
+def license_gate_keyboard(license_url: str, user_id: int) -> InlineKeyboardMarkup:
     rows = []
     if license_url:
-        rows.append([InlineKeyboardButton(text="📜 Условия лицензии", url=license_url)])
-    rows.append([InlineKeyboardButton(text="✅ Принимаю условия", callback_data="license:accept")])
+        rows.append([InlineKeyboardButton(text=tr(user_id, "license_url"), url=license_url)])
+    rows.append([InlineKeyboardButton(text=tr(user_id, "license_accept_button"), callback_data="license:accept")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 async def show_license_gate(target, user_id: int) -> None:
     license_url = get_setting("license_url", "")
-    text = (
-        "📜 <b>Лицензионное соглашение</b>\n\n"
-        "Перед использованием магазина необходимо принять условия."
-    )
-    await safe_edit_or_send(target, text, reply_markup=license_gate_keyboard(license_url))
+    text = tr(user_id, "license_title")
+    await safe_edit_or_send(target, text, reply_markup=license_gate_keyboard(license_url, user_id))
 
 
 # ─── home / catalog / product ───────────────────────────────────────────────
 async def show_home(target, first_name: str):
-    welcome_template = get_setting(
-        "welcome_text",
-        "<b>PLS Store</b>\nПлагины и дополнения для FunPayCardinal\n\nДобро пожаловать, {first_name}!",
-    )
+    lang = get_user_language(target.from_user.id if isinstance(target, CallbackQuery) else target.from_user.id)
+    welcome_template = get_setting("welcome_text", I18N[lang]["welcome"]) if lang == "ru" else I18N["en"]["welcome"]
     safe_name = html.escape(first_name)
     try:
         text = welcome_template.replace("{first_name}", safe_name)
     except Exception:
         text = f"<b>PLS Store</b>\nДобро пожаловать, {safe_name}!"
     photo = banner_path("home")
-    await safe_edit_or_send(target, text, reply_markup=main_menu_kb(), photo=photo)
+    await safe_edit_or_send(target, text, reply_markup=main_menu_kb(lang), photo=photo)
 
 
 async def render_catalog(target) -> None:
     products = get_products()
     if not products:
-        text = (
-            f"🛒 <b>{btn('shop_title', 'Магазин PLS Store')}</b>\n\n"
-            "Пока товаров нет. Загляни позже или напиши в поддержку."
-        )
+        text = f"🛒 <b>{tr(target.from_user.id, 'shop')}</b>\n\n{tr(target.from_user.id, 'no_products')}"
         markup = back_kb("home")
     else:
         builder = InlineKeyboardBuilder()
@@ -324,9 +383,9 @@ async def render_catalog(target) -> None:
             else:
                 title = f"{plain_stored_text(product['name'])} — {product['price']}"
             builder.button(text=title[:64], callback_data=f"product:{product['id']}")
-        builder.add(design_button("btn_back", "⬅️ Назад", "home"))
+        builder.add(design_button("btn_back", tr(target.from_user.id, "back"), "home"))
         builder.adjust(1)
-        text = f"🛒 <b>{btn('shop_title', 'Магазин PLS Store')}</b>\n\nВыбери интересующий товар:"
+        text = f"🛒 <b>{tr(target.from_user.id, 'shop')}</b>\n\n{tr(target.from_user.id, 'choose_product')}"
         markup = builder.as_markup()
 
     photo = banner_path("shop")
@@ -372,7 +431,7 @@ async def cb_home(callback: CallbackQuery):
 
 @dp.callback_query(F.data == "license:accept")
 async def cb_license_accept(callback: CallbackQuery):
-    await callback.answer("Спасибо! Условия приняты.")
+    await callback.answer(tr(callback.from_user.id, "license_accept"))
     accept_license(callback.from_user.id)
     await show_home(callback, callback.from_user.first_name or "покупатель")
 
@@ -405,16 +464,16 @@ async def cb_product(callback: CallbackQuery):
         return
     product = get_product(product_id)
     if not product or not product.get("active", 1):
-        await safe_edit_or_send(callback, "Этот товар больше недоступен.", reply_markup=back_kb("catalog"))
+        await safe_edit_or_send(callback, tr(callback.from_user.id, "unavailable"), reply_markup=back_kb("catalog", get_user_language(callback.from_user.id)))
         return
 
-    text = build_product_caption(product)
+    text = build_product_caption(product, lang=get_user_language(callback.from_user.id))
     price_rub = parse_price_rub(product["price"], product)
     rows = [
-        [InlineKeyboardButton(text=f"🛒 Купить за {price_rub:.0f}₽", callback_data=f"buybal:{product_id}")],
-        [InlineKeyboardButton(text="📩 Оставить заявку (вручную)", callback_data=f"buy:{product_id}")],
-        [InlineKeyboardButton(text="⬅️ Назад в каталог", callback_data="catalog")],
-        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="home")],
+        [InlineKeyboardButton(text=tr(callback.from_user.id, "buy", price=price_rub), callback_data=f"buybal:{product_id}")],
+        [InlineKeyboardButton(text=tr(callback.from_user.id, "manual"), callback_data=f"buy:{product_id}")],
+        [InlineKeyboardButton(text=tr(callback.from_user.id, "back_catalog"), callback_data="catalog")],
+        [InlineKeyboardButton(text=tr(callback.from_user.id, "home"), callback_data="home")],
     ]
     keyboard = InlineKeyboardMarkup(inline_keyboard=rows)
     image_path = product.get("image_path")
@@ -438,40 +497,34 @@ async def cb_buy_balance(callback: CallbackQuery, bot: Bot):
         return
     product = get_product(product_id)
     if not product or not product.get("active", 1):
-        await callback.message.answer("Товар недоступен.")
+        await callback.message.answer(tr(callback.from_user.id, "unavailable"))
         return
     user_id = callback.from_user.id
     ensure_user(user_id, callback.from_user.username, callback.from_user.first_name)
     price = parse_price_rub(product["price"], product)
     if price <= 0:
-        await callback.message.answer("Цена товара не задана. Обратитесь в поддержку.")
+        await callback.message.answer("Product price is not set. Contact support." if get_user_language(callback.from_user.id) == "en" else "Цена товара не задана. Обратитесь в поддержку.")
         return
     u = get_user(user_id)
     bal = float(u["balance"]) if u else 0.0
     if bal < price:
         kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="💳 Пополнить баланс", callback_data="topup")],
-            [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"product:{product_id}")],
+            [InlineKeyboardButton(text=("💳 Add balance" if get_user_language(user_id) == "en" else "💳 Пополнить баланс"), callback_data="topup")],
+            [InlineKeyboardButton(text=tr(user_id, "back"), callback_data=f"product:{product_id}")],
         ])
         await callback.message.answer(
-            f"Недостаточно средств.\n\n"
-            f"Цена: <b>{price:.0f}₽</b>\n"
-            f"Ваш баланс: <b>{bal:.0f}₽</b>\n\n"
-            "Пополните баланс и повторите покупку.",
+            ((f"Insufficient funds.\n\nPrice: <b>{price:.0f}₽</b>\nYour balance: <b>{bal:.0f}₽</b>\n\nAdd funds and try again.") if get_user_language(user_id) == "en" else (f"Недостаточно средств.\n\nЦена: <b>{price:.0f}₽</b>\nВаш баланс: <b>{bal:.0f}₽</b>\n\nПополните баланс и повторите покупку.")),
             reply_markup=kb,
         )
         return
 
     # confirm
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"✅ Подтвердить списание {price:.0f}₽", callback_data=f"buyok:{product_id}")],
-        [InlineKeyboardButton(text="❌ Отмена", callback_data=f"product:{product_id}")],
+        [InlineKeyboardButton(text=(f"✅ Confirm charge {price:.0f}₽" if get_user_language(user_id) == "en" else f"✅ Подтвердить списание {price:.0f}₽"), callback_data=f"buyok:{product_id}")],
+        [InlineKeyboardButton(text=("❌ Cancel" if get_user_language(user_id) == "en" else "❌ Отмена"), callback_data=f"product:{product_id}")],
     ])
     await callback.message.answer(
-        f"Подтвердите покупку:\n\n"
-        f"📦 <b>{safe_stored_html(product['name'])}</b>\n"
-        f"💰 {price:.0f}₽\n"
-        f"Баланс после покупки: <b>{bal - price:.0f}₽</b>",
+        ((f"Confirm purchase:\n\n📦 <b>{safe_stored_html(product['name'])}</b>\n💰 {price:.0f}₽\nBalance after purchase: <b>{bal - price:.0f}₽</b>") if get_user_language(user_id) == "en" else (f"Подтвердите покупку:\n\n📦 <b>{safe_stored_html(product['name'])}</b>\n💰 {price:.0f}₽\nБаланс после покупки: <b>{bal - price:.0f}₽</b>")),
         reply_markup=kb,
     )
 
@@ -485,14 +538,14 @@ async def cb_buy_confirm(callback: CallbackQuery, bot: Bot):
         return
     product = get_product(product_id)
     if not product:
-        await callback.message.answer("Товар недоступен.")
+        await callback.message.answer(tr(callback.from_user.id, "unavailable"))
         return
     user_id = callback.from_user.id
     price = parse_price_rub(product["price"], product)
     try:
         new_bal = change_balance(user_id, -price, f"Покупка: {product['name']}")
     except ValueError:
-        await callback.message.answer("Недостаточно средств. Пополните баланс.")
+        await callback.message.answer("Insufficient funds. Add balance and try again." if get_user_language(user_id) == "en" else "Недостаточно средств. Пополните баланс.")
         return
     purchase_id = add_purchase(user_id, product_id, price, product["name"])
     # also create order record for admin visibility
@@ -502,15 +555,10 @@ async def cb_buy_confirm(callback: CallbackQuery, bot: Bot):
             (user_id, callback.from_user.username, product_id),
         )
     await callback.message.answer(
-        f"✅ <b>Покупка успешна!</b>\n\n"
-        f"Товар: <b>{safe_stored_html(product['name'])}</b>\n"
-        f"Списано: {price:.0f}₽\n"
-        f"Баланс: <b>{new_bal:.0f}₽</b>\n\n"
-        "Товар доступен в разделе «Мои покупки».\n"
-        "Продавец получил уведомление и свяжется при необходимости.",
+        ((f"✅ <b>Purchase successful!</b>\n\nProduct: <b>{safe_stored_html(product['name'])}</b>\nCharged: {price:.0f}₽\nBalance: <b>{new_bal:.0f}₽</b>\n\nYour product is available in My purchases.\nThe seller has been notified and will contact you if needed.") if get_user_language(user_id) == "en" else (f"✅ <b>Покупка успешна!</b>\n\nТовар: <b>{safe_stored_html(product['name'])}</b>\nСписано: {price:.0f}₽\nБаланс: <b>{new_bal:.0f}₽</b>\n\nТовар доступен в разделе «Мои покупки».\nПродавец получил уведомление и свяжется при необходимости.")),
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🛒 Мои покупки", callback_data="mypurchases")],
-            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="home")],
+            [InlineKeyboardButton(text=("🛒 My purchases" if get_user_language(user_id) == "en" else "🛒 Мои покупки"), callback_data="mypurchases")],
+            [InlineKeyboardButton(text=tr(callback.from_user.id, "home"), callback_data="home")],
         ]),
     )
     try:
@@ -547,10 +595,8 @@ async def cb_buy(callback: CallbackQuery, bot: Bot):
         order_id = cursor.lastrowid
     await safe_edit_or_send(
         callback,
-        "✅ <b>Заявка отправлена!</b>\n\n"
-        "Продавец получил уведомление и свяжется с тобой для оформления покупки.\n"
-        "Оплата и передача товара согласовываются вручную.",
-        reply_markup=back_kb("home"),
+        ("✅ <b>Request sent!</b>\n\nThe seller has been notified and will contact you to arrange the purchase.\nPayment and delivery will be arranged manually." if get_user_language(user.id) == "en" else "✅ <b>Заявка отправлена!</b>\n\nПродавец получил уведомление и свяжется с тобой для оформления покупки.\nОплата и передача товара согласовываются вручную."),
+        reply_markup=back_kb("home", get_user_language(user.id)),
     )
     username = f"@{user.username}" if user.username else "без username"
     try:
@@ -582,7 +628,8 @@ async def cb_profile(event: Message | CallbackQuery):
     if not has_accepted_license(user.id):
         await show_license_gate(target, user.id)
         return
-    text = profile_text(user.id, user)
+    lang = get_user_language(user.id)
+    text = profile_text(user.id, user, lang)
     # count referrals
     with db() as conn:
         ref_count = conn.execute(
@@ -590,7 +637,7 @@ async def cb_profile(event: Message | CallbackQuery):
         ).fetchone()["c"]
     text = text.replace("🎁 Рефералов: <b>0</b>", f"🎁 Рефералов: <b>{ref_count}</b>")
     photo = banner_path("profile")
-    await safe_edit_or_send(target, text, reply_markup=profile_kb(), photo=photo)
+    await safe_edit_or_send(target, text, reply_markup=profile_kb(lang), photo=photo)
 
 
 @dp.callback_query(F.data == "mypurchases")
@@ -602,9 +649,9 @@ async def cb_mypurchases(callback: CallbackQuery):
             (callback.from_user.id,),
         ).fetchall()
     if not rows:
-        text = "🛒 <b>Мои покупки</b>\n\nПока пусто. Загляните в магазин!"
+        text = f"{tr(callback.from_user.id, 'purchases')}\n\n{tr(callback.from_user.id, 'empty_purchases')}"
     else:
-        lines = ["🛒 <b>Мои покупки</b>\n"]
+        lines = [tr(callback.from_user.id, "purchases") + "\n"]
         for r in rows:
             lines.append(
                 f"• {html.escape(r['product_name'] or 'Товар')} — {r['price']:.0f}₽\n"
@@ -617,10 +664,9 @@ async def cb_mypurchases(callback: CallbackQuery):
 @dp.callback_query(F.data == "api_info")
 async def cb_api_info(callback: CallbackQuery):
     await callback.answer()
-    text = get_setting(
-        "api_info_text",
-        "⚡ <b>API</b>\n\nРаздел API пока в разработке.\nОбратитесь в поддержку за доступом.",
-    )
+    text = get_setting("api_info_text", tr(callback.from_user.id, "api_info"))
+    if get_user_language(callback.from_user.id) == "en" and text.startswith("⚡ <b>API</b>"):
+        text = tr(callback.from_user.id, "api_info")
     await safe_edit_or_send(callback, text, reply_markup=back_kb("profile"))
 
 
@@ -629,7 +675,7 @@ async def cb_promo(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     await state.set_state(ProductWizard.promo_create)  # reuse for input
     await callback.message.answer(
-        "🎟 Введите промокод:",
+        tr(callback.from_user.id, "promo_enter"),
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="⬅️ Отмена", callback_data="profile")]
         ]),
@@ -645,17 +691,17 @@ async def promo_apply(message: Message, state: FSMContext):
             "SELECT * FROM promos WHERE upper(code)=? AND active=1", (code,)
         ).fetchone()
         if not promo:
-            await message.answer("Промокод не найден или неактивен.", reply_markup=back_kb("profile"))
+            await message.answer(tr(message.from_user.id, "promo_bad"), reply_markup=back_kb("profile", get_user_language(message.from_user.id)))
             return
         used = conn.execute(
             "SELECT 1 FROM promo_uses WHERE promo_id=? AND user_id=?",
             (promo["id"], message.from_user.id),
         ).fetchone()
         if used:
-            await message.answer("Вы уже использовали этот промокод.", reply_markup=back_kb("profile"))
+            await message.answer(tr(message.from_user.id, "promo_used"), reply_markup=back_kb("profile", get_user_language(message.from_user.id)))
             return
         if promo["max_uses"] is not None and promo["used_count"] >= promo["max_uses"]:
-            await message.answer("Лимит использований исчерпан.", reply_markup=back_kb("profile"))
+            await message.answer(tr(message.from_user.id, "promo_limit"), reply_markup=back_kb("profile", get_user_language(message.from_user.id)))
             return
         # apply
         if promo["discount_type"] == "fixed":
@@ -673,7 +719,7 @@ async def promo_apply(message: Message, state: FSMContext):
             (promo["id"],),
         )
     await message.answer(
-        f"✅ Промокод применён! Начислено <b>{bonus:.0f}₽</b>.",
+        tr(message.from_user.id, "promo_ok", bonus=bonus),
         reply_markup=back_kb("profile"),
     )
 
@@ -690,14 +736,13 @@ async def cb_referral(callback: CallbackQuery, bot: Bot):
         ).fetchone()["c"]
         u = get_user(callback.from_user.id)
         earned = u["referral_earnings"] if u else 0
-    text = (
-        f"🔗 <b>Реферальная система</b>\n\n"
-        f"Ваша ссылка:\n<code>{link}</code>\n\n"
-        f"Вы получаете <b>{pct}%</b> от пополнений приглашённых.\n"
-        f"Приглашено: <b>{ref_count}</b>\n"
-        f"Заработано: <b>{earned:.0f}₽</b>"
-    )
-    await safe_edit_or_send(callback, text, reply_markup=back_kb("profile"))
+    if get_user_language(callback.from_user.id) == "en":
+        text = (f"🔗 <b>Referral program</b>\n\nYour link:\n<code>{link}</code>\n\n"
+                f"You earn <b>{pct}%</b> from your referrals' top-ups.\nInvited: <b>{ref_count}</b>\nEarned: <b>{earned:.0f}₽</b>")
+    else:
+        text = (f"🔗 <b>Реферальная система</b>\n\nВаша ссылка:\n<code>{link}</code>\n\n"
+                f"Вы получаете <b>{pct}%</b> от пополнений приглашённых.\nПриглашено: <b>{ref_count}</b>\nЗаработано: <b>{earned:.0f}₽</b>")
+    await safe_edit_or_send(callback, text, reply_markup=back_kb("profile", get_user_language(callback.from_user.id)))
 
 
 # ─── topup / Platega ────────────────────────────────────────────────────────
@@ -705,14 +750,9 @@ async def cb_referral(callback: CallbackQuery, bot: Bot):
 async def cb_topup(callback: CallbackQuery):
     await callback.answer()
     ensure_user(callback.from_user.id, callback.from_user.username, callback.from_user.first_name)
-    text = (
-        f"<b>{btn('topup_title', '💳 Пополнение баланса')}</b>\n\n"
-        "Выберите сумму или укажите свою.\n"
-        "Оплата через Platega (СБП / карты).\n"
-        "Средства зачисляются автоматически после подтверждения."
-    )
+    text = f"<b>{tr(callback.from_user.id, 'topup_title')}</b>\n\n{tr(callback.from_user.id, 'topup_choose')}"
     photo = banner_path("topup")
-    await safe_edit_or_send(callback, text, reply_markup=topup_amounts_kb(), photo=photo)
+    await safe_edit_or_send(callback, text, reply_markup=topup_amounts_kb(get_user_language(callback.from_user.id)), photo=photo)
 
 
 @dp.callback_query(F.data.startswith("topup:"))
@@ -722,7 +762,7 @@ async def cb_topup_amount(callback: CallbackQuery, state: FSMContext, bot: Bot):
     if part == "custom":
         await state.set_state(ProductWizard.topup_custom)
         await callback.message.answer(
-            f"Введите сумму пополнения в рублях (минимум {get_setting('min_topup', '100')}₽):"
+            tr(callback.from_user.id, "topup_custom", minimum=get_setting('min_topup', '100'))
         )
         return
     try:
@@ -737,11 +777,11 @@ async def topup_custom_msg(message: Message, state: FSMContext, bot: Bot):
     try:
         amount = float((message.text or "").replace(",", ".").strip())
     except ValueError:
-        await message.answer("Введите число, например 500")
+        await message.answer(tr(message.from_user.id, "number"))
         return
     min_a = float(get_setting("min_topup", "100"))
     if amount < min_a:
-        await message.answer(f"Минимальная сумма: {min_a:.0f}₽")
+        await message.answer(tr(message.from_user.id, "minimum", amount=min_a))
         return
     await state.clear()
     await create_topup(message, message.from_user, amount, bot)
@@ -751,8 +791,7 @@ async def create_topup(message: Message, user, amount: float, bot: Bot):
     ensure_user(user.id, user.username, user.first_name)
     if not platega:
         await message.answer(
-            "⚠️ Платёжная система пока не настроена.\n"
-            "Администратор должен указать PLATEGA_MERCHANT_ID и PLATEGA_SECRET в .env."
+            tr(user.id, "payment_unavailable")
         )
         return
     payload = f"topup:{user.id}:{amount}"
@@ -773,7 +812,7 @@ async def create_topup(message: Message, user, amount: float, bot: Bot):
         )
     except PlategaError as e:
         log.exception("create payment failed")
-        await message.answer(f"Ошибка создания платежа: {e}")
+        await message.answer(tr(user.id, "payment_error", error=e))
         return
 
     tx_id = data.get("transactionId") or data.get("id")
@@ -786,13 +825,11 @@ async def create_topup(message: Message, user, amount: float, bot: Bot):
         )
     rows = []
     if redirect:
-        rows.append([InlineKeyboardButton(text="💳 Перейти к оплате", url=redirect)])
-    rows.append([InlineKeyboardButton(text="🔄 Проверить статус", callback_data=f"paystatus:{tx_id}")])
-    rows.append([InlineKeyboardButton(text="⬅️ В профиль", callback_data="profile")])
+        rows.append([InlineKeyboardButton(text=tr(user.id, "pay"), url=redirect)])
+    rows.append([InlineKeyboardButton(text=tr(user.id, "check"), callback_data=f"paystatus:{tx_id}")])
+    rows.append([InlineKeyboardButton(text=tr(user.id, "to_profile"), callback_data="profile")])
     await message.answer(
-        f"💳 Счёт на <b>{amount:.0f}₽</b> создан.\n"
-        f"ID: <code>{tx_id}</code>\n\n"
-        "Нажмите кнопку для оплаты. После успешной оплаты баланс пополнится автоматически.",
+        tr(user.id, "invoice", amount=amount, tx_id=tx_id),
         reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
     )
 
@@ -802,7 +839,7 @@ async def cb_pay_status(callback: CallbackQuery, bot: Bot):
     await callback.answer()
     tx_id = callback.data.split(":", 1)[1]
     if not platega:
-        await callback.message.answer("Platega не настроена")
+        await callback.message.answer(tr(callback.from_user.id, "payment_unavailable"))
         return
     try:
         data = await platega.get_status(tx_id)
@@ -810,7 +847,7 @@ async def cb_pay_status(callback: CallbackQuery, bot: Bot):
         await callback.message.answer(f"Ошибка: {e}")
         return
     status = (data.get("status") or "").upper()
-    await callback.message.answer(f"Статус платежа <code>{tx_id}</code>: <b>{status}</b>")
+    await callback.message.answer(tr(callback.from_user.id, "status", tx_id=tx_id, status=status))
     if status == "CONFIRMED":
         await process_confirmed_payment(tx_id, data, bot)
 
@@ -841,7 +878,7 @@ async def process_confirmed_payment(tx_id: str, data: dict, bot: Bot) -> bool:
     try:
         await bot.send_message(
             user_id,
-            f"✅ Баланс пополнен на <b>{amount:.0f}₽</b>.\nТекущий баланс: <b>{new_bal:.0f}₽</b>",
+            (f"✅ Balance topped up by <b>{amount:.0f}₽</b>.\nCurrent balance: <b>{new_bal:.0f}₽</b>" if get_user_language(user_id) == "en" else f"✅ Баланс пополнен на <b>{amount:.0f}₽</b>.\nТекущий баланс: <b>{new_bal:.0f}₽</b>"),
         )
     except Exception:
         pass
@@ -888,60 +925,64 @@ def documents_keyboard() -> InlineKeyboardMarkup:
 
 @dp.callback_query(F.data == "language")
 async def cb_language(callback: CallbackQuery):
-    await callback.answer("Пока доступен только русский язык.", show_alert=True)
+    await callback.answer()
+    lang = get_user_language(callback.from_user.id)
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=("🇷🇺 Русский ✓" if lang == "ru" else "🇷🇺 Русский"), callback_data="lang:set:ru")],
+        [InlineKeyboardButton(text=("🇬🇧 English ✓" if lang == "en" else "🇬🇧 English"), callback_data="lang:set:en")],
+        [InlineKeyboardButton(text=tr(callback.from_user.id, "back"), callback_data="home")],
+    ])
+    await safe_edit_or_send(callback, tr(callback.from_user.id, "language_title"), reply_markup=kb)
+
+
+@dp.callback_query(F.data.startswith("lang:set:"))
+async def cb_language_set(callback: CallbackQuery):
+    lang = callback.data.rsplit(":", 1)[-1]
+    if lang not in ("ru", "en"):
+        await callback.answer("Invalid language", show_alert=True)
+        return
+    set_user_language(callback.from_user.id, lang)
+    await callback.answer(I18N[lang]["language_saved"], show_alert=True)
+    await show_home(callback, callback.from_user.first_name or "customer")
 
 
 @dp.callback_query(F.data == "faq")
 async def cb_faq(callback: CallbackQuery):
     await callback.answer()
-    text = (
-        f"<b>{btn('faq_title', '❓ FAQ — частые вопросы')}</b>\n\n"
-        "🗓 <b>Как купить?</b>\n"
-        "Профиль → «Пополнить», затем Магазин → выберите товар → оплата с баланса.\n\n"
-        "💲 <b>Чем платить?</b>\n"
-        "СБП (оплата из приложения банка) и криптовалюта (USDT) через CryptoBot, xRocket и Binance. Баланс зачисляется автоматически.\n\n"
-        "🚀 <b>Когда придёт товар?</b>\n"
-        "Сразу после оплаты — выдача автоматическая. Товар всегда в Профиль → 🛒 Покупки, можно забрать повторно.\n\n"
-        "☑️ <b>Гарантия и замена?</b>\n"
-        "По вопросам замены и гарантии — в поддержку.\n\n"
-        "🎧 <b>Поддержка</b>\n"
-        "Кнопка «Поддержка» в главном меню."
-    )
     markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📄 Документы", callback_data="documents")],
-        [design_button("btn_back", "⬅️ Назад", "home")],
+        [InlineKeyboardButton(text=("📄 Documents" if get_user_language(callback.from_user.id) == "en" else "📄 Документы"), callback_data="documents")],
+        [design_button("btn_back", tr(callback.from_user.id, "back"), "home")],
     ])
-    await safe_edit_or_send(callback, text, reply_markup=markup, photo=banner_path("faq"))
+    await safe_edit_or_send(callback, f"<b>{tr(callback.from_user.id, 'faq_title')}</b>\n\n{tr(callback.from_user.id, 'faq')}", reply_markup=markup, photo=banner_path("faq"))
 
 
 @dp.callback_query(F.data == "documents")
 async def cb_documents(callback: CallbackQuery):
     await callback.answer()
-    text = (
-        "<b>📄 Документы</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━\n\n"
-        "Правила сервиса, обработка данных и актуальные цены."
-    )
-    await safe_edit_or_send(
-        callback,
-        text,
-        reply_markup=documents_keyboard(),
-        photo=banner_path("faq"),
-    )
+    lang = get_user_language(callback.from_user.id)
+    titles = [
+        (("🔒 Privacy Policy" if lang == "en" else "🔒 Политика конфиденциальности"), DOCUMENTS[0][1]),
+        (("📜 User Agreement" if lang == "en" else "📜 Пользовательское соглашение"), DOCUMENTS[1][1]),
+        (("💵 Products and Pricing" if lang == "en" else "💵 Товары и тарифы"), DOCUMENTS[2][1]),
+    ]
+    rows = [[InlineKeyboardButton(text=title, url=url)] for title, url in titles]
+    rows += [[InlineKeyboardButton(text=("🎧 Support" if lang == "en" else "🎧 Поддержка"), callback_data="support")],
+             [design_button("btn_back", tr(callback.from_user.id, "back"), "faq")]]
+    await safe_edit_or_send(callback, tr(callback.from_user.id, "documents"), reply_markup=InlineKeyboardMarkup(inline_keyboard=rows), photo=banner_path("faq"))
 
 
 # ─── support / reviews ──────────────────────────────────────────────────────
-def support_screen():
+def support_screen(user_id: int):
     support_username = get_setting("support_username", SUPPORT_USERNAME).lstrip("@")
     if support_username:
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="💬 Написать в поддержку", url=f"https://t.me/{support_username}")],
-            [InlineKeyboardButton(text="⬅️ Главное меню", callback_data="home")],
+            [InlineKeyboardButton(text=tr(user_id, "write_support"), url=f"https://t.me/{support_username}")],
+            [InlineKeyboardButton(text=tr(user_id, "home"), callback_data="home")],
         ])
-        text = "💬 <b>Поддержка PLS Store</b>\n\nНажми кнопку ниже, чтобы написать продавцу."
+        text = tr(user_id, "support")
     else:
-        keyboard = back_kb("home")
-        text = "💬 Поддержка пока не настроена."
+        keyboard = back_kb("home", get_user_language(user_id))
+        text = tr(user_id, "support_unset")
     return text, keyboard
 
 
@@ -953,7 +994,7 @@ async def cb_support(event: Message | CallbackQuery):
         target = event
     else:
         target = event
-    text, keyboard = support_screen()
+    text, keyboard = support_screen(event.from_user.id)
     await safe_edit_or_send(target, text, reply_markup=keyboard)
 
 
@@ -963,13 +1004,13 @@ async def cb_reviews(callback: CallbackQuery):
     url = get_setting("reviews_url", REVIEWS_URL)
     if url:
         kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⭐ Открыть отзывы", url=url)],
-            [InlineKeyboardButton(text="⬅️ Назад", callback_data="home")],
+            [InlineKeyboardButton(text=tr(callback.from_user.id, "reviews"), url=url)],
+            [InlineKeyboardButton(text=tr(callback.from_user.id, "back"), callback_data="home")],
         ])
-        text = "⭐ Отзывы покупателей PLS Store"
+        text = tr(callback.from_user.id, "reviews_title")
     else:
         kb = back_kb("home")
-        text = "⭐ Ссылка на отзывы пока не настроена."
+        text = tr(callback.from_user.id, "reviews_unset")
     await safe_edit_or_send(callback, text, reply_markup=kb)
 
 
@@ -1678,13 +1719,19 @@ async def start_callback_server(bot: Bot):
 
 
 async def setup_bot_commands(bot: Bot):
-    await bot.set_my_commands([
-        BotCommand(command="start", description="Главное меню"),
-        BotCommand(command="catalog", description="Магазин"),
-        BotCommand(command="profile", description="Профиль"),
-        BotCommand(command="support", description="Поддержка"),
-        BotCommand(command="admin", description="Админ-панель"),
-    ])
+    public_commands = [
+        BotCommand(command="start", description="Главное меню / Main menu"),
+        BotCommand(command="catalog", description="Магазин / Shop"),
+        BotCommand(command="profile", description="Профиль / Profile"),
+        BotCommand(command="support", description="Поддержка / Support"),
+    ]
+    await bot.set_my_commands(public_commands, scope=BotCommandScopeDefault())
+    if ADMIN_ID:
+        await bot.set_my_commands(public_commands + [
+            BotCommand(command="admin", description="Админ-панель"),
+            BotCommand(command="addpromo", description="Создать промокод"),
+            BotCommand(command="reply", description="Ответить пользователю"),
+        ], scope=BotCommandScopeChat(chat_id=ADMIN_ID))
 
 
 async def main():

@@ -56,7 +56,7 @@ def init_db() -> None:
             )
         """)
 
-        # migrations for products / orders
+        # migrations for users / products / orders
         cols = {r[1] for r in conn.execute("PRAGMA table_info(products)")}
         for col, sql in [
             ("image_path", "ALTER TABLE products ADD COLUMN image_path TEXT"),
@@ -90,6 +90,9 @@ def init_db() -> None:
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        user_cols = {r[1] for r in conn.execute("PRAGMA table_info(users)")}
+        if "language" not in user_cols:
+            conn.execute("ALTER TABLE users ADD COLUMN language TEXT NOT NULL DEFAULT 'ru'")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS payments (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -319,3 +322,15 @@ def get_faq(active_only: bool = True):
                 "SELECT * FROM faq WHERE active=1 ORDER BY sort_order, id"
             ).fetchall()
         return conn.execute("SELECT * FROM faq ORDER BY sort_order, id").fetchall()
+
+
+def get_user_language(user_id: int) -> str:
+    with db() as conn:
+        row = conn.execute("SELECT language FROM users WHERE user_id=?", (user_id,)).fetchone()
+    return row["language"] if row and row["language"] in ("ru", "en") else "ru"
+
+
+def set_user_language(user_id: int, language: str) -> None:
+    language = language if language in ("ru", "en") else "ru"
+    with db() as conn:
+        conn.execute("UPDATE users SET language=? WHERE user_id=?", (language, user_id))
