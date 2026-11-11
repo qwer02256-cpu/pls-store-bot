@@ -47,6 +47,29 @@ class LedgerTests(unittest.TestCase):
             with self.assertRaises(ValueError):settle_payment('tx',data)
         self.assertEqual(db.get_user(2)['balance'],0)
 
+    def test_one_ruble_invoice_with_payer_surcharge_credits_only_one(self):
+        with db.db() as conn:
+            conn.execute("UPDATE payments SET amount=1 WHERE platega_id='tx'")
+        payload={'status':'CONFIRMED','id':'tx','paymentDetails':{'amount':'1.09','currency':'RUB'}}
+        result=settle_payment('tx',payload)
+        self.assertEqual(result['amount'],1)
+        self.assertEqual(db.get_user(2)['balance'],1)
+        self.assertEqual(db.get_user(1)['balance'],0.1)
+        self.assertIsNone(settle_payment('tx',payload))
+        self.assertEqual(db.get_user(2)['balance'],1)
+        with db.db() as conn:
+            row=conn.execute('SELECT delta FROM balance_log WHERE user_id=2').fetchone()
+            self.assertEqual(row['delta'],1)
+
+    def test_underpaid_one_ruble_invoice_stays_pending(self):
+        with db.db() as conn:
+            conn.execute("UPDATE payments SET amount=1 WHERE platega_id='tx'")
+        with self.assertRaisesRegex(ValueError,'below invoice'):
+            settle_payment('tx',{'status':'CONFIRMED','amount':'0.99','currency':'RUB'})
+        self.assertEqual(db.get_user(2)['balance'],0)
+        with db.db() as conn:
+            self.assertEqual(conn.execute('SELECT status FROM payments').fetchone()[0],'PENDING')
+
     def test_iso_numeric_ruble_currency_settles_and_still_rejects_other_currencies(self):
         payload={'status':'CONFIRMED','id':'tx','paymentDetails':{'amount':'100.25','currency':643}}
         self.assertEqual(settle_payment('tx',payload)['balance'],100.25)

@@ -42,8 +42,10 @@ def settle_payment(tx_id: str, data: dict):
         details = data.get('paymentDetails') or data
         if not isinstance(details, dict):
             raise ValueError('Invalid payment details')
-        if 'amount' in details and money(details['amount']) != amount:
-            raise ValueError('Payment amount mismatch')
+        # The provider total may include a payer-side surcharge. Credit only
+        # the locally recorded invoice principal, never the surcharge.
+        if 'amount' in details and money(details['amount']) < amount:
+            raise ValueError('Payment amount is below invoice amount')
         if details.get('currency') and currency_code(details['currency']) != currency_code(row['currency']):
             raise ValueError('Payment currency mismatch')
         user_id = row['user_id']
