@@ -185,7 +185,7 @@ def init_db() -> None:
             "faq_title": "❓ FAQ — частые вопросы",
             "topup_title": "💳 Пополнение баланса",
             "referral_percent": "10",
-            "min_topup": "100",
+            "min_topup": "1",
         }
         for k, v in defaults.items():
             conn.execute(
@@ -221,6 +221,15 @@ def init_db() -> None:
             "UPDATE bot_settings SET value=REPLACE(value, ?, ?) WHERE key='welcome_text'",
             ("Плагины · Дополнения · FunPayCardinal", "Плагины для FunPayCardinal"),
         )
+
+        # Apply the requested 1 RUB minimum once to existing databases.
+        if not conn.execute(
+            "SELECT 1 FROM bot_settings WHERE key='min_topup_one_ruble_applied'"
+        ).fetchone():
+            conn.execute("UPDATE bot_settings SET value='1' WHERE key='min_topup'")
+            conn.execute(
+                "INSERT INTO bot_settings(key, value) VALUES ('min_topup_one_ruble_applied', '1')"
+            )
 
         # seed FAQ if empty
         faq_count = conn.execute("SELECT COUNT(*) AS c FROM faq").fetchone()["c"]

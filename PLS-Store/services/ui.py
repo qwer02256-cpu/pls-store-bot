@@ -109,7 +109,7 @@ def profile_text(user_id: int, tg_user, lang: str = "ru") -> str:
 
 
 def topup_amounts_kb(lang: str = "ru") -> InlineKeyboardMarkup:
-    amounts = [100, 300, 500, 1000, 2000, 5000]
+    amounts = [1, 100, 300, 500, 1000, 2000, 5000]
     rows = []
     row = []
     for a in amounts:

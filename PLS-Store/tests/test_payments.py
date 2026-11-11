@@ -159,3 +159,36 @@ class InvoiceTests(unittest.IsolatedAsyncioTestCase):
             with patch.object(main,'platega',provider):
                 await main.create_topup(message,SimpleNamespace(id=2,username=None,first_name='Buyer'),100,bot)
             with db.db() as conn:self.assertEqual(conn.execute('SELECT COUNT(*) FROM payments').fetchone()[0],0)
+
+
+class MinimumTopupTests(unittest.IsolatedAsyncioTestCase):
+    def test_existing_minimum_updates_once_and_preset_contains_one(self):
+        from services.ui import topup_amounts_kb
+        with tempfile.TemporaryDirectory() as tmp,patch.object(db,'DB_PATH',Path(tmp)/'db'):
+            db.init_db()
+            with db.db() as conn:conn.execute("DELETE FROM bot_settings WHERE key='min_topup_one_ruble_applied'")
+            db.set_setting('min_topup','100')
+            db.init_db()
+            self.assertEqual(db.get_setting('min_topup'),'1')
+            buttons=[b for row in topup_amounts_kb().inline_keyboard for b in row]
+            self.assertTrue(any(b.callback_data=='topup:1' and b.text=='1₽' for b in buttons))
+            db.set_setting('min_topup','10')
+            db.init_db()
+            self.assertEqual(db.get_setting('min_topup'),'10')
+
+    async def test_one_ruble_invoice_is_accepted_and_sub_ruble_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp,patch.object(db,'DB_PATH',Path(tmp)/'db'):
+            db.init_db()
+            provider=SimpleNamespace(create_payment=AsyncMock(return_value={'id':'one','redirect':'https://app.platega.io/pay/one','status':'PENDING'}))
+            bot=SimpleNamespace(me=AsyncMock(return_value=SimpleNamespace(username='store_bot')))
+            message=SimpleNamespace(answer=AsyncMock())
+            user=SimpleNamespace(id=2,username=None,first_name='Buyer')
+            with patch.object(main,'platega',provider):
+                await main.create_topup(message,user,1,bot)
+                self.assertEqual(provider.create_payment.call_args.kwargs['amount'],1)
+                provider.create_payment.reset_mock()
+                await main.create_topup(message,user,0.99,bot)
+                provider.create_payment.assert_not_awaited()
+            with db.db() as conn:
+                rows=conn.execute('SELECT amount FROM payments').fetchall()
+                self.assertEqual([r['amount'] for r in rows],[1])

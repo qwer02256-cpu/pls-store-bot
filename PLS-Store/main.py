@@ -871,7 +871,7 @@ async def cb_topup_amount(callback: CallbackQuery, state: FSMContext, bot: Bot):
     if part == "custom":
         await state.set_state(ProductWizard.topup_custom)
         await callback.message.answer(
-            tr(callback.from_user.id, "topup_custom", minimum=get_setting('min_topup', '100'))
+            tr(callback.from_user.id, "topup_custom", minimum=get_setting('min_topup', '1'))
         )
         return
     try:
@@ -888,7 +888,7 @@ async def topup_custom_msg(message: Message, state: FSMContext, bot: Bot):
     except ValueError:
         await message.answer(tr(message.from_user.id, "number"))
         return
-    min_a = float(get_setting("min_topup", "100"))
+    min_a = float(get_setting("min_topup", "1"))
     if amount < min_a:
         await message.answer(tr(message.from_user.id, "minimum", amount=min_a))
         return
@@ -899,7 +899,7 @@ async def topup_custom_msg(message: Message, state: FSMContext, bot: Bot):
 async def create_topup(message: Message, user, amount: float, bot: Bot):
     try:
         amount = float(money(amount))
-        minimum = money(get_setting("min_topup", "100"))
+        minimum = money(get_setting("min_topup", "1"))
     except ValueError:
         await message.answer(tr(user.id, "number"))
         return

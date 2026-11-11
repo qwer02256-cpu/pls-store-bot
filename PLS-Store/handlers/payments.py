@@ -52,7 +52,7 @@ async def cb_topup_amount(callback: CallbackQuery, state: FSMContext, bot: Bot):
         await state.set_state(TopupStates.custom_amount)
         await callback.message.answer(
             "Введите сумму пополнения в рублях (минимум "
-            f"{get_setting('min_topup', '100')}₽):"
+            f"{get_setting('min_topup', '1')}₽):"
         )
         return
     try:
@@ -69,7 +69,7 @@ async def topup_custom(message: Message, state: FSMContext, bot: Bot):
     except ValueError:
         await message.answer("Введите число, например 500")
         return
-    min_a = float(get_setting("min_topup", "100"))
+    min_a = float(get_setting("min_topup", "1"))
     if amount < min_a:
         await message.answer(f"Минимальная сумма: {min_a:.0f}₽")
         return
