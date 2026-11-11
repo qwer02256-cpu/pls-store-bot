@@ -65,6 +65,7 @@ from services.db import (
     set_user_language,
 )
 from services.platega import PlategaClient, PlategaError
+from services.emoji import PackEmojiMiddleware
 from services.ui import (
     main_menu_kb,
     profile_kb,
@@ -1141,6 +1142,23 @@ def admin_home_keyboard():
     ])
 
 
+@dp.message(Command("syncemojis"))
+async def cmd_sync_emojis(message: Message, bot: Bot):
+    if not is_admin(message.from_user.id):
+        return
+    middleware = next((item for item in bot.session.middleware if isinstance(item, PackEmojiMiddleware)), None)
+    if middleware is None:
+        await message.answer("Модуль эмодзи не подключён. Перезапустите бота.")
+        return
+    try:
+        count = await middleware.refresh(bot)
+    except Exception as exc:
+        log.warning("Emoji refresh failed: %s", type(exc).__name__)
+        await message.answer("Не удалось загрузить набор эмодзи. Проверьте CUSTOM_EMOJI_PACKS и доступ бота к Telegram.")
+        return
+    await message.answer(f"✅ Набор обновлён: {count} эмодзи. Откройте главное меню заново.")
+
+
 @dp.message(Command("admin"))
 async def cmd_admin(message: Message):
     if not is_admin(message.from_user.id):
@@ -1832,6 +1850,7 @@ async def setup_bot_commands(bot: Bot):
             BotCommand(command="admin", description="Админ-панель"),
             BotCommand(command="addpromo", description="Создать промокод"),
             BotCommand(command="reply", description="Ответить пользователю"),
+            BotCommand(command="syncemojis", description="Обновить анимированные эмодзи"),
         ], scope=BotCommandScopeChat(chat_id=ADMIN_ID))
 
 
@@ -1840,6 +1859,12 @@ async def main():
     init_db()
     seed_if_empty()
     bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    emoji_middleware = PackEmojiMiddleware()
+    bot.session.middleware(emoji_middleware)
+    try:
+        await emoji_middleware.refresh(bot)
+    except Exception as exc:
+        log.warning("Emoji set loading failed (%s); using cached icons or standard emoji", type(exc).__name__)
     try:
         await setup_bot_commands(bot)
     except Exception:
