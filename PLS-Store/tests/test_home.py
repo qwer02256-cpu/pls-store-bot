@@ -24,12 +24,30 @@ class HomeTests(unittest.IsolatedAsyncioTestCase):
     def test_existing_default_migrates_and_custom_greeting_survives(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(db,'DB_PATH',Path(tmp)/'store.db'):
             db.init_db()
+            with db.db() as conn:
+                conn.execute("DELETE FROM bot_settings WHERE key='home_welcome_layout_version'")
             db.set_setting('welcome_text','<b>PLS Store</b>\nПлагины и дополнения для FunPayCardinal\n\nДобро пожаловать, {first_name}!')
             db.init_db()
             self.assertIn('{balance}',db.get_setting('welcome_text'))
             db.set_setting('welcome_text','My custom greeting {first_name}')
             db.init_db()
             self.assertEqual(db.get_setting('welcome_text'),'My custom greeting {first_name}')
+
+    def test_saved_legacy_greeting_is_upgraded_and_backed_up_once(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(db,'DB_PATH',Path(tmp)/'store.db'):
+            db.init_db()
+            with db.db() as conn:
+                conn.execute("DELETE FROM bot_settings WHERE key='home_welcome_layout_version'")
+            legacy='PLS Store — старый текст из админки'
+            db.set_setting('welcome_text',legacy)
+            db.init_db()
+            self.assertIn('Главное меню',db.get_setting('welcome_text'))
+            self.assertIn('{balance}',db.get_setting('welcome_text'))
+            self.assertEqual(db.get_setting('welcome_text_before_home_v2'),legacy)
+            db.set_setting('welcome_text','New owner greeting {balance}')
+            db.init_db()
+            self.assertEqual(db.get_setting('welcome_text'),'New owner greeting {balance}')
+            self.assertEqual(db.get_setting('welcome_text_before_home_v2'),legacy)
 
 if __name__ == '__main__':
     unittest.main()

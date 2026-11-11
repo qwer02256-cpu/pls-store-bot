@@ -187,15 +187,33 @@ def init_db() -> None:
             "referral_percent": "10",
             "min_topup": "100",
         }
-        # Upgrade only the original default, preserving owner-customized greetings.
-        conn.execute(
-            "UPDATE bot_settings SET value=? WHERE key='welcome_text' AND value=?",
-            (defaults["welcome_text"], '<b>PLS Store</b>\nПлагины и дополнения для FunPayCardinal\n\nДобро пожаловать, {first_name}!'),
-        )
         for k, v in defaults.items():
             conn.execute(
                 "INSERT OR IGNORE INTO bot_settings(key, value) VALUES (?, ?)",
                 (k, v),
+            )
+
+        # Apply the requested home layout once, including databases with a saved greeting.
+        # Keep the previous text available; later edits in the admin panel still persist.
+        version = conn.execute(
+            "SELECT value FROM bot_settings WHERE key='home_welcome_layout_version'"
+        ).fetchone()
+        if not version or version["value"] != "2":
+            current = conn.execute(
+                "SELECT value FROM bot_settings WHERE key='welcome_text'"
+            ).fetchone()
+            if current and current["value"] != defaults["welcome_text"]:
+                conn.execute(
+                    "INSERT OR IGNORE INTO bot_settings(key, value) VALUES (?, ?)",
+                    ("welcome_text_before_home_v2", current["value"]),
+                )
+            conn.execute(
+                "UPDATE bot_settings SET value=? WHERE key='welcome_text'",
+                (defaults["welcome_text"],),
+            )
+            conn.execute(
+                "INSERT INTO bot_settings(key, value) VALUES ('home_welcome_layout_version', '2') "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value"
             )
 
         # seed FAQ if empty
