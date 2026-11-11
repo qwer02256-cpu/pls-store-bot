@@ -6,7 +6,8 @@ import re
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from services.db import get_setting, ensure_user, get_user, get_user_language
+from services.db import get_setting, ensure_user, get_user, get_user_language, db
+from config import SUPPORT_USERNAME
 
 
 def btn(key: str, default: str) -> str:
@@ -29,6 +30,16 @@ def design_button(key: str, default: str, callback_data: str, style: str | None 
     return InlineKeyboardButton(**kwargs)
 
 
+def support_button(lang: str = "ru") -> InlineKeyboardButton:
+    label = "🎧 Support" if lang == "en" else "🎧 Поддержка"
+    button = design_button("btn_support", label, "support", "danger", label)
+    username = get_setting("support_username", SUPPORT_USERNAME).strip().lstrip("@")
+    if username:
+        button.callback_data = None
+        button.url = f"https://t.me/{username}"
+    return button
+
+
 def main_menu_kb(lang: str = "ru") -> InlineKeyboardMarkup:
     # Layout and colors match the supplied reference: blue/green pairs,
     # followed by a full-width red support button.
@@ -40,21 +51,21 @@ def main_menu_kb(lang: str = "ru") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [design_button("btn_profile", profile, "profile", "primary", profile), design_button("btn_shop", shop, "catalog", "success", shop)],
         [design_button("btn_language", language, "language", "primary", language), design_button("btn_faq", faq, "faq", "success", faq)],
-        [design_button("btn_support", support, "support", "danger", support)],
+        [support_button(lang)],
     ])
 
 
 def profile_kb(lang: str = "ru") -> InlineKeyboardMarkup:
     labels = {
-        "ru": ("💳 Пополнить баланс", "🛒 Мои покупки", "⚡ API", "🎟 Промокод", "🔗 Рефералка", "⬅️ Назад"),
+        "ru": ("💳 Пополнить баланс", "🛒 Покупки", "⚡ API", "🎁 Промокод", "🔗 Рефералка", "« Назад"),
         "en": ("💳 Add balance", "🛒 My purchases", "⚡ API", "🎟 Promo code", "🔗 Referrals", "⬅️ Back"),
     }
     topup, purchases, api, promo, referral, back = labels.get(lang, labels["ru"])
     return InlineKeyboardMarkup(inline_keyboard=[
-        [design_button("btn_topup", topup, "topup", text_override=topup)],
-        [design_button("btn_purchases", purchases, "mypurchases", text_override=purchases), design_button("btn_api", api, "api_info", text_override=api)],
-        [design_button("btn_promo", promo, "promo", text_override=promo), design_button("btn_referral", referral, "referral", text_override=referral)],
-        [design_button("btn_back", back, "home", text_override=back)],
+        [design_button("btn_topup", topup, "topup", "success", text_override=topup)],
+        [design_button("btn_purchases", purchases, "mypurchases", "primary", text_override=purchases), design_button("btn_api", api, "api_info", "primary", text_override=api)],
+        [design_button("btn_promo", promo, "promo", "primary", text_override=promo), design_button("btn_referral", referral, "referral", "primary", text_override=referral)],
+        [design_button("btn_back", back, "home", "danger", text_override=back)],
     ])
 
 
@@ -65,15 +76,22 @@ def back_kb(to: str = "home", lang: str = "ru") -> InlineKeyboardMarkup:
 
 def profile_text(user_id: int, tg_user, lang: str = "ru") -> str:
     u = ensure_user(user_id, tg_user.username, tg_user.first_name)
-    name = html.escape(tg_user.full_name or u.get("first_name") or "—")
-    uname = f"@{html.escape(tg_user.username)}" if tg_user.username else "—"
-    if lang == "en":
-        return (f"<b>👤 Profile</b>\n\n👤 {name}\n🆔 <code>{user_id}</code>\n"
-                f"💰 Balance: <b>{u['balance']:.0f}₽</b>\n💸 Total spent: <b>{u['total_spent']:.0f}₽</b>\n"
-                f"🛒 Purchases: <b>{u['purchases_count']}</b>\n🎁 Referrals: <b>0</b> · earned <b>{u['referral_earnings']:.0f}₽</b>\n")
-    return (f"<b>{btn('profile_title', '👤 Профиль')}</b>\n\n👤 {name}\n🆔 <code>{user_id}</code>\n"
-            f"💰 Баланс: <b>{u['balance']:.0f}₽</b>\n💸 Всего потрачено: <b>{u['total_spent']:.0f}₽</b>\n"
-            f"🛒 Покупок: <b>{u['purchases_count']}</b>\n🎁 Рефералов: <b>0</b> · заработано <b>{u['referral_earnings']:.0f}₽</b>\n")
+    with db() as conn:
+        referrals = conn.execute(
+            "SELECT COUNT(*) FROM users WHERE referrer_id=?", (user_id,)
+        ).fetchone()[0]
+    en = lang == "en"
+    title = "👤 Profile" if en else btn("profile_title", "👤 Профиль")
+    return (
+        f"<b>{html.escape(title)}</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"💲 {'Balance' if en else 'Баланс'}: <b>{u['balance']:.0f}₽</b>\n"
+        f"🧾 {'Total spent' if en else 'Всего потрачено'}: {u['total_spent']:.0f}₽\n"
+        f"🛒 {'Purchases' if en else 'Покупок'}: {u['purchases_count']}\n"
+        f"🔗 {'Referrals' if en else 'Рефералов'}: {referrals} · "
+        f"{'earned' if en else 'заработано'} {u['referral_earnings']:.0f}₽\n\n"
+        f"🆔 {'Your ID' if en else 'Ваш ID'}: <code>{user_id}</code>"
+    )
 
 
 def topup_amounts_kb(lang: str = "ru") -> InlineKeyboardMarkup:

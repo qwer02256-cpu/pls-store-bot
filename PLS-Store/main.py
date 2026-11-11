@@ -69,6 +69,7 @@ from services.ui import (
     back_kb,
     topup_amounts_kb,
     profile_text,
+    support_button,
     btn,
     design_button,
 )
@@ -249,7 +250,11 @@ def banner_path(key: str) -> Path | None:
         p = BANNERS_DIR / name
         if p.is_file():
             return p
-    # fallbacks
+    # Uploaded banners take precedence over bundled section defaults.
+    if key in {"profile", "faq"}:
+        bundled = ASSETS_DIR / f"{key}.png"
+        if bundled.is_file():
+            return bundled
     if key == "home" and BANNER_PATH.is_file():
         return BANNER_PATH
     return None
@@ -630,12 +635,6 @@ async def cb_profile(event: Message | CallbackQuery):
         return
     lang = get_user_language(user.id)
     text = profile_text(user.id, user, lang)
-    # count referrals
-    with db() as conn:
-        ref_count = conn.execute(
-            "SELECT COUNT(*) AS c FROM users WHERE referrer_id=?", (user.id,)
-        ).fetchone()["c"]
-    text = text.replace("🎁 Рефералов: <b>0</b>", f"🎁 Рефералов: <b>{ref_count}</b>")
     photo = banner_path("profile")
     await safe_edit_or_send(target, text, reply_markup=profile_kb(lang), photo=photo)
 
@@ -917,7 +916,7 @@ def documents_keyboard() -> InlineKeyboardMarkup:
         for title, url in DOCUMENTS
     ]
     rows.extend([
-        [InlineKeyboardButton(text="🎧 Поддержка", callback_data="support")],
+        [support_button()],
         [design_button("btn_back", "⬅️ Назад", "faq")],
     ])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -950,10 +949,10 @@ async def cb_language_set(callback: CallbackQuery):
 async def cb_faq(callback: CallbackQuery):
     await callback.answer()
     markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=("📄 Documents" if get_user_language(callback.from_user.id) == "en" else "📄 Документы"), callback_data="documents")],
-        [design_button("btn_back", tr(callback.from_user.id, "back"), "home")],
+        [design_button("btn_documents", ("📄 Documents" if get_user_language(callback.from_user.id) == "en" else "📄 Документы"), "documents", "primary")],
+        [design_button("btn_back", ("« Back" if get_user_language(callback.from_user.id) == "en" else "« Назад"), "home", "danger")],
     ])
-    await safe_edit_or_send(callback, f"<b>{tr(callback.from_user.id, 'faq_title')}</b>\n\n{tr(callback.from_user.id, 'faq')}", reply_markup=markup, photo=banner_path("faq"))
+    await safe_edit_or_send(callback, f"<b>{tr(callback.from_user.id, 'faq_title')}</b>\n━━━━━━━━━━━━━━━━━━━━\n\n{tr(callback.from_user.id, 'faq')}", reply_markup=markup, photo=banner_path("faq"))
 
 
 @dp.callback_query(F.data == "documents")
@@ -966,7 +965,7 @@ async def cb_documents(callback: CallbackQuery):
         (("💵 Products and Pricing" if lang == "en" else "💵 Товары и тарифы"), DOCUMENTS[2][1]),
     ]
     rows = [[InlineKeyboardButton(text=title, url=url)] for title, url in titles]
-    rows += [[InlineKeyboardButton(text=("🎧 Support" if lang == "en" else "🎧 Поддержка"), callback_data="support")],
+    rows += [[support_button(lang)],
              [design_button("btn_back", tr(callback.from_user.id, "back"), "faq")]]
     await safe_edit_or_send(callback, tr(callback.from_user.id, "documents"), reply_markup=InlineKeyboardMarkup(inline_keyboard=rows), photo=banner_path("faq"))
 
