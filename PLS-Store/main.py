@@ -127,6 +127,53 @@ def is_admin(user_id: int) -> bool:
     return user_id == ADMIN_ID
 
 
+def message_text_with_custom_emoji(message: Message) -> str:
+    """Convert incoming Telegram custom-emoji entities to Bot API HTML tags."""
+    value = message.text or message.caption or ""
+    entities = message.entities or message.caption_entities or []
+    replacements = []
+    # Telegram entity offsets are UTF-16 code units, while Python indexes code points.
+    for entity in entities:
+        if entity.type != "custom_emoji" or not entity.custom_emoji_id:
+            continue
+        start_units, end_units = entity.offset, entity.offset + entity.length
+        units = 0
+        start_idx = end_idx = None
+        for idx, char in enumerate(value):
+            if units == start_units:
+                start_idx = idx
+            units += len(char.encode("utf-16-le")) // 2
+            if units == end_units:
+                end_idx = idx + 1
+                break
+        if start_idx is not None and end_idx is not None:
+            emoji = html.escape(value[start_idx:end_idx])
+            tag = f'<tg-emoji emoji-id="{entity.custom_emoji_id}">{emoji}</tg-emoji>'
+            replacements.append((start_idx, end_idx, tag))
+    for start_idx, end_idx, tag in sorted(replacements, reverse=True):
+        value = value[:start_idx] + tag + value[end_idx:]
+    return value
+
+
+def plain_stored_text(value: str | None) -> str:
+    """Fallback text for Telegram fields (e.g. inline keyboard labels) without entity support."""
+    return re.sub(r'<tg-emoji emoji-id="\d+">(.*?)</tg-emoji>', r'\1', value or "", flags=re.DOTALL)
+
+
+def safe_stored_html(value: str | None) -> str:
+    """Escape stored text while allowing only our Telegram custom-emoji tags."""
+    value = value or ""
+    pattern = re.compile(r'<tg-emoji emoji-id="\d+">.*?</tg-emoji>', re.DOTALL)
+    parts = []
+    last = 0
+    for match in pattern.finditer(value):
+        parts.append(html.escape(value[last:match.start()]))
+        parts.append(match.group(0))
+        last = match.end()
+    parts.append(html.escape(value[last:]))
+    return "".join(parts)
+
+
 def banner_path(key: str) -> Path | None:
     """Return path to section banner if exists."""
     name = get_setting(f"banner_{key}", "")
@@ -162,11 +209,11 @@ async def safe_edit_or_send(target, text: str, reply_markup=None, photo: Path | 
 
 
 def build_product_caption(product, *, max_desc: int = 420) -> str:
-    name = html.escape(product["name"] or "")
+    name = safe_stored_html(product["name"])
     desc = (product["description"] or "").strip()
     if len(desc) > max_desc:
         desc = desc[: max_desc - 1] + "…"
-    desc = html.escape(desc)
+    desc = safe_stored_html(desc)
     price = html.escape(product["price"] or "")
     lines = [f"💎 <b>{name}</b>\n", f"<blockquote>{desc}</blockquote>\n"]
     if product.get("article_url"):
@@ -272,9 +319,9 @@ async def render_catalog(target) -> None:
             ver = (product["version"] or "").strip() if product["version"] else ""
             if ver:
                 ver_disp = ver if ver.lower().startswith("v") else f"v{ver}"
-                title = f"{product['name']} {ver_disp} — {product['price']}"
+                title = f"{plain_stored_text(product['name'])} {ver_disp} — {product['price']}"
             else:
-                title = f"{product['name']} — {product['price']}"
+                title = f"{plain_stored_text(product['name'])} — {product['price']}"
             builder.button(text=title[:64], callback_data=f"product:{product['id']}")
         builder.button(text=btn("btn_back", "⬅️ Назад"), callback_data="home")
         builder.adjust(1)
@@ -421,7 +468,7 @@ async def cb_buy_balance(callback: CallbackQuery, bot: Bot):
     ])
     await callback.message.answer(
         f"Подтвердите покупку:\n\n"
-        f"📦 <b>{html.escape(product['name'])}</b>\n"
+        f"📦 <b>{safe_stored_html(product['name'])}</b>\n"
         f"💰 {price:.0f}₽\n"
         f"Баланс после покупки: <b>{bal - price:.0f}₽</b>",
         reply_markup=kb,
@@ -455,7 +502,7 @@ async def cb_buy_confirm(callback: CallbackQuery, bot: Bot):
         )
     await callback.message.answer(
         f"✅ <b>Покупка успешна!</b>\n\n"
-        f"Товар: <b>{html.escape(product['name'])}</b>\n"
+        f"Товар: <b>{safe_stored_html(product['name'])}</b>\n"
         f"Списано: {price:.0f}₽\n"
         f"Баланс: <b>{new_bal:.0f}₽</b>\n\n"
         "Товар доступен в разделе «Мои покупки».\n"
@@ -469,7 +516,7 @@ async def cb_buy_confirm(callback: CallbackQuery, bot: Bot):
         await bot.send_message(
             ADMIN_ID,
             f"✅ <b>Автопокупка #{purchase_id}</b>\n\n"
-            f"Товар: {html.escape(product['name'])}\n"
+            f"Товар: {safe_stored_html(product['name'])}\n"
             f"Цена: {price:.0f}₽\n"
             f"Покупатель: {html.escape(callback.from_user.full_name)}\n"
             f"ID: <code>{user_id}</code>",
@@ -509,7 +556,7 @@ async def cb_buy(callback: CallbackQuery, bot: Bot):
         await bot.send_message(
             ADMIN_ID,
             f"🔔 <b>Новая заявка №{order_id}</b>\n\n"
-            f"Товар: <b>{html.escape(product['name'])}</b>\n"
+            f"Товар: <b>{safe_stored_html(product['name'])}</b>\n"
             f"Цена: {html.escape(product['price'])}\n"
             f"Покупатель: {html.escape(user.full_name)}\n"
             f"Username: {html.escape(username)}\n"
@@ -1014,7 +1061,7 @@ async def adm_design_edit(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     await callback.message.answer(
         f"Текущее значение <code>{key}</code>:\n\n{html.escape(current)}\n\n"
-        "Отправьте новое значение (или /cancel):"
+        "Отправьте текст сообщением с Premium Emoji (или /cancel). Эмодзи сохранятся в тексте."
     )
 
 
@@ -1027,7 +1074,7 @@ async def adm_design_save(message: Message, state: FSMContext):
     if not key:
         await state.clear()
         return
-    set_setting(key, message.text or "")
+    set_setting(key, message_text_with_custom_emoji(message))
     await state.clear()
     await message.answer(
         f"✅ Сохранено: <code>{key}</code>",
@@ -1124,16 +1171,16 @@ async def adm_faq_add(callback: CallbackQuery, state: FSMContext):
         return
     await state.set_state(ProductWizard.faq_add_q)
     await callback.answer()
-    await callback.message.answer("Отправьте текст вопроса:")
+    await callback.message.answer("Отправьте вопрос. Можно вставлять Premium Emoji прямо в текст:")
 
 
 @dp.message(ProductWizard.faq_add_q, F.text)
 async def adm_faq_add_q(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
-    await state.update_data(faq_q=message.text)
+    await state.update_data(faq_q=message_text_with_custom_emoji(message))
     await state.set_state(ProductWizard.faq_add_a)
-    await message.answer("Теперь отправьте ответ:")
+    await message.answer("Теперь отправьте ответ. Premium Emoji также поддерживаются:")
 
 
 @dp.message(ProductWizard.faq_add_a, F.text)
@@ -1142,7 +1189,7 @@ async def adm_faq_add_a(message: Message, state: FSMContext):
         return
     data = await state.get_data()
     q = data.get("faq_q", "")
-    a = message.text or ""
+    a = message_text_with_custom_emoji(message)
     with db() as conn:
         conn.execute("INSERT INTO faq (question, answer, sort_order) VALUES (?, ?, 999)", (q, a))
     await state.clear()
@@ -1354,7 +1401,7 @@ async def adm_products(callback: CallbackQuery):
     for p in products:
         flag = "✅" if p["active"] else "🚫"
         builder.button(
-            text=f"{flag} {p['name'][:40]} — {p['price']}",
+            text=f"{flag} {plain_stored_text(p['name'])[:40]} — {p['price']}",
             callback_data=f"adm:p:{p['id']}",
         )
     builder.button(text="⬅️ Назад", callback_data="adm:home")
@@ -1373,7 +1420,7 @@ async def adm_product_open(callback: CallbackQuery):
         return
     await callback.answer()
     text = (
-        f"🧩 <b>{html.escape(product['name'])}</b>\n"
+        f"🧩 <b>{safe_stored_html(product['name'])}</b>\n"
         f"Цена: {html.escape(product['price'])}\n"
         f"Активен: {'да' if product['active'] else 'нет'}\n"
         f"ID: {product['id']}"
@@ -1418,7 +1465,7 @@ async def adm_edit_field(callback: CallbackQuery, state: FSMContext):
     await state.update_data(product_id=pid, field=field)
     await state.set_state(ProductWizard.edit_value)
     await callback.answer()
-    await callback.message.answer(f"Отправьте новое значение для «{field}» (или /cancel):")
+    await callback.message.answer(f"Отправьте новое значение для «{field}» (Premium Emoji поддерживаются, или /cancel):")
 
 
 @dp.message(ProductWizard.edit_value, F.text)
@@ -1427,7 +1474,7 @@ async def adm_edit_value(message: Message, state: FSMContext):
         return
     data = await state.get_data()
     pid, field = data["product_id"], data["field"]
-    value = message.text or ""
+    value = message_text_with_custom_emoji(message)
     allowed = {"name", "price", "description", "article_url", "video_url", "version"}
     if field not in allowed:
         await state.clear()
@@ -1454,14 +1501,14 @@ async def adm_add_start(callback: CallbackQuery, state: FSMContext):
         return
     await state.set_state(ProductWizard.add_name)
     await callback.answer()
-    await callback.message.answer("Отправьте название товара:")
+    await callback.message.answer("Отправьте название товара (Premium Emoji поддерживаются):")
 
 
 @dp.message(ProductWizard.add_name, F.text)
 async def adm_add_name(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
-    await state.update_data(name=message.text)
+    await state.update_data(name=message_text_with_custom_emoji(message))
     await state.set_state(ProductWizard.add_price)
     await message.answer("Отправьте цену (например: 3490₽):")
 
@@ -1472,7 +1519,7 @@ async def adm_add_price(message: Message, state: FSMContext):
         return
     await state.update_data(price=message.text)
     await state.set_state(ProductWizard.add_description)
-    await message.answer("Отправьте описание:")
+    await message.answer("Отправьте описание товара. Premium Emoji поддерживаются:")
 
 
 @dp.message(ProductWizard.add_description, F.text)
@@ -1484,7 +1531,7 @@ async def adm_add_description(message: Message, state: FSMContext):
     with db() as conn:
         cur = conn.execute(
             "INSERT INTO products (name, price, description, price_rub) VALUES (?, ?, ?, ?)",
-            (data["name"], price, message.text, parse_price_rub(price)),
+            (data["name"], price, message_text_with_custom_emoji(message), parse_price_rub(price)),
         )
         pid = cur.lastrowid
     await state.clear()
