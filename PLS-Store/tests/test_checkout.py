@@ -15,6 +15,7 @@ class CheckoutTests(unittest.IsolatedAsyncioTestCase):
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
         p=patch.object(db,'DB_PATH',Path(self.tmp.name)/'store.db');p.start();self.addCleanup(p.stop)
         db.init_db();db.ensure_user(2,username='buyer',first_name='Buyer')
+        main.accept_license(2)
         db.change_balance(2,50,'initial')
         with db.db() as conn:
             cur=conn.execute("INSERT INTO products(name,price,price_rub,description) VALUES('Plugin','299₽',299,'Description')")

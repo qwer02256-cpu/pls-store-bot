@@ -71,6 +71,7 @@ from services.emoji import PackEmojiMiddleware
 from services.payment_ledger import settle_payment, money
 from services.payment_monitor import monitor_payments
 from services.payment_options import METHOD_FEES, method_info
+from services.documents import document_rows, DEFAULT_URLS, valid_url as valid_document_url
 from services.ui import (
     main_menu_kb,
     profile_kb,
@@ -376,6 +377,10 @@ for _lang, _texts in {'ru': {'plugins_title': '🧩 Плагины для FunPay
                          'Recorded in My purchases. A notification has been sent to the seller.'}}.items():
     I18N[_lang].update(_texts)
 
+I18N['ru']["license_title"] = '📄 <b>Документы PLS Store</b>\n━━━━━━━━━━━━━━━━━━━━\n\nПеред использованием магазина ознакомьтесь с документами по кнопкам ниже.\n\n📜 Прочитайте пользовательское соглашение, политику конфиденциальности и условия товаров и тарифов.\n\n✅ После ознакомления нажмите «Принимаю условия», чтобы продолжить.'
+I18N['uk']["license_title"] = '📄 <b>Документи PLS Store</b>\n━━━━━━━━━━━━━━━━━━━━\n\nПеред використанням магазину ознайомтеся з документами за кнопками нижче.\n\n📜 Прочитайте угоду користувача, політику конфіденційності й умови товарів і тарифів.\n\n✅ Після ознайомлення натисніть «Приймаю умови», щоб продовжити.'
+I18N['en']["license_title"] = '📄 <b>PLS Store Documents</b>\n━━━━━━━━━━━━━━━━━━━━\n\nBefore using the store, open the documents using the buttons below.\n\n📜 Read the User Agreement, Privacy Policy, and Products and Pricing terms.\n\n✅ After reviewing them, press “I accept the terms” to continue.'
+
 def tr(user_id: int, key: str, **kwargs) -> str:
     lang = get_user_language(user_id)
     template = I18N.get(lang, I18N["ru"]).get(key, I18N["ru"].get(key, key))
@@ -542,10 +547,10 @@ def accept_license(user_id: int) -> None:
 
 
 def license_gate_keyboard(license_url: str, user_id: int) -> InlineKeyboardMarkup:
-    rows = []
-    if license_url:
-        rows.append([InlineKeyboardButton(text=tr(user_id, "license_url"), url=license_url)])
-    rows.append([InlineKeyboardButton(text=tr(user_id, "license_accept_button"), callback_data="license:accept")])
+    rows = document_rows(get_user_language(user_id), license_url=license_url)
+    rows.append([InlineKeyboardButton(
+        text=tr(user_id, "license_accept_button"), callback_data="license:accept", style="success"
+    )])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -720,6 +725,9 @@ async def cb_product(callback: CallbackQuery):
 async def cb_buy_balance(callback: CallbackQuery, bot: Bot):
     # Old purchase/manual buttons also lead to the current checkout.
     await callback.answer()
+    if not has_accepted_license(callback.from_user.id):
+        await show_license_gate(callback, callback.from_user.id)
+        return
     try:
         product_id = int(callback.data.split(":", 1)[1])
     except (ValueError, IndexError):
@@ -751,6 +759,9 @@ async def cb_purchase_method(callback: CallbackQuery, bot: Bot):
         await callback.answer(tr(callback.from_user.id, "payment_method_invalid"), show_alert=True)
         return
     await callback.answer()
+    if not has_accepted_license(callback.from_user.id):
+        await show_license_gate(callback, callback.from_user.id)
+        return
     product = get_product(product_id)
     if not product or not product.get("active", 1):
         await callback.message.answer(tr(callback.from_user.id, "unavailable"))
@@ -1134,18 +1145,10 @@ async def process_confirmed_payment(tx_id: str, data: dict, bot: Bot) -> bool:
 
 
 # ─── FAQ / documents ────────────────────────────────────────────────────────
-DOCUMENTS = [
-    ("🔒 Политика конфиденциальности", "https://telegra.ph/Politika-konfidencialnosti-PLS-STORE-11-07"),
-    ("📜 Пользовательское соглашение", "https://telegra.ph/Polzovatelskoe-soglashenie-PLS-STORE-11-07"),
-    ("💵 Товары и тарифы", "https://telegra.ph/Tovary-i-tarify-PLS-STORE-11-07"),
-]
 
 
 def documents_keyboard() -> InlineKeyboardMarkup:
-    rows = [
-        [InlineKeyboardButton(text=title, url=url)]
-        for title, url in DOCUMENTS
-    ]
+    rows = document_rows("ru")
     rows.extend([
         [support_button(style=None)],
         [design_button("btn_back", "⬅️ Назад", "faq", "danger")],
@@ -1187,12 +1190,7 @@ async def cb_faq(callback: CallbackQuery):
 async def cb_documents(callback: CallbackQuery):
     await callback.answer()
     lang = get_user_language(callback.from_user.id)
-    titles = [
-        (("🔒 Privacy Policy" if lang == "en" else ("🔒 Політика конфіденційності" if lang == "uk" else "🔒 Политика конфиденциальности")), DOCUMENTS[0][1]),
-        (("📜 User Agreement" if lang == "en" else ("📜 Угода користувача" if lang == "uk" else "📜 Пользовательское соглашение")), DOCUMENTS[1][1]),
-        (("💵 Products and Pricing" if lang == "en" else ("💵 Товари й тарифи" if lang == "uk" else "💵 Товары и тарифы")), DOCUMENTS[2][1]),
-    ]
-    rows = [[InlineKeyboardButton(text=title, url=url)] for title, url in titles]
+    rows = document_rows(lang)
     rows += [[support_button(lang, style=None)],
              [design_button("btn_back", tr(callback.from_user.id, "back"), "faq", "danger")]]
     await safe_edit_or_send(callback, tr(callback.from_user.id, "documents"), reply_markup=InlineKeyboardMarkup(inline_keyboard=rows), photo=banner_path("faq"))
@@ -1322,6 +1320,9 @@ DESIGN_KEYS = [
     ("referral_percent", "Реф. %"),
     ("min_topup", "Мин. пополнение"),
     ("api_info_text", "Текст раздела API"),
+    ("document_privacy_url", "URL: политика конфиденциальности"),
+    ("document_agreement_url", "URL: пользовательское соглашение"),
+    ("document_terms_url", "URL: товары и тарифы"),
 ]
 
 
@@ -1351,6 +1352,8 @@ async def adm_design_edit(callback: CallbackQuery, state: FSMContext):
     await state.set_state(ProductWizard.design_edit)
     await state.update_data(design_key=key)
     current = get_setting(key, "")
+    if key.startswith("document_") and key.endswith("_url"):
+        current = current or DEFAULT_URLS.get(key[len("document_"):-len("_url")], "")
     await callback.answer()
     await callback.message.answer(
         (f"Текущее значение <code>{key}</code>:\n\n{html.escape(current)}\n\n"
@@ -1368,7 +1371,13 @@ async def adm_design_save(message: Message, state: FSMContext):
     if not key:
         await state.clear()
         return
-    stored_value = message_text_with_custom_emoji(message)
+    if key in {"document_privacy_url", "document_agreement_url", "document_terms_url"}:
+        stored_value = (message.text or "").strip()
+        if not valid_document_url(stored_value):
+            await message.answer("Отправьте полную HTTPS-ссылку на документ, например https://telegra.ph/…")
+            return
+    else:
+        stored_value = message_text_with_custom_emoji(message)
     set_setting(key, stored_value)
     if key.startswith("btn_"):
         # Telegram button icons use a separate Bot API field, not a <tg-emoji> HTML tag.
