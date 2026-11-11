@@ -122,3 +122,19 @@ def topup_amounts_kb(lang: str = "ru") -> InlineKeyboardMarkup:
     rows.append([InlineKeyboardButton(text=("✏️ Custom amount" if lang == "en" else ("✏️ Своя сума" if lang == "uk" else "✏️ Своя сумма")), callback_data="topup:custom")])
     rows.append([design_button("btn_back", ("⬅️ Back" if lang == "en" else "⬅️ Назад"), "profile", text_override=("⬅️ Back" if lang == "en" else "⬅️ Назад"))])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def payment_methods_kb(amount, lang: str = 'ru') -> InlineKeyboardMarkup:
+    from services.payment_options import METHOD_FEES, method_info
+    fee_word = {'ru': 'комиссия', 'uk': 'комісія', 'en': 'fee'}.get(lang, 'комиссия')
+    rows = []
+    for method in METHOD_FEES:
+        label, fee = method_info(method, lang)
+        icon = '💳' if method == 2 else '💰'
+        rows.append([InlineKeyboardButton(
+            text=f'{icon} {label} · {fee_word} {fee}%',
+            callback_data=f'topupmethod:{method}:{amount:.2f}',
+        )])
+    back = '« Back' if lang == 'en' else '« Назад'
+    rows.append([design_button('btn_back', back, 'topup', 'danger', text_override=back)])
+    return InlineKeyboardMarkup(inline_keyboard=rows)

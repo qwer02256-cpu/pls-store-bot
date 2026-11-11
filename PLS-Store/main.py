@@ -70,11 +70,13 @@ from services.platega import PlategaClient, PlategaError
 from services.emoji import PackEmojiMiddleware
 from services.payment_ledger import settle_payment, money
 from services.payment_monitor import monitor_payments
+from services.payment_options import METHOD_FEES, method_info
 from services.ui import (
     main_menu_kb,
     profile_kb,
     back_kb,
     topup_amounts_kb,
+    payment_methods_kb,
     profile_text,
     support_button,
     language_kb,
@@ -264,6 +266,47 @@ I18N["uk"] = {'welcome': '<b>PLS Store</b>\n🏠 <b>Головне меню</b>\
  'api_info': '⚡ <b>API</b>\n\nРозділ API ще в розробці.\nЗверніться до підтримки для доступу.',
  'license_url': '📜 Умови ліцензії',
  'license_accept_button': '✅ Приймаю умови'}
+
+for _lang, _texts in {'ru': {'topup_choose': 'Выберите сумму или укажите свою.\n'
+                        'Затем выберите способ: СБП — комиссия 8,5%, криптовалюта — 5%.\n'
+                        'Комиссию оплачивает покупатель сверх суммы пополнения.',
+        'payment_method_choose': '💳 <b>Выберите способ оплаты</b>\n'
+                                 '\n'
+                                 'На баланс поступит: <b>{amount:.2f}₽</b>\n'
+                                 'Комиссию оплачивает покупатель сверх этой суммы. Итог к оплате указан на странице '
+                                 'Platega.',
+        'payment_method_details': 'Способ: <b>{method}</b>\n'
+                                  'Комиссия покупателя: <b>{fee}%</b>\n'
+                                  'На баланс поступит: <b>{amount:.2f}₽</b>\n'
+                                  'Итоговая сумма с комиссией указана на странице Platega.',
+        'payment_method_invalid': 'Выберите доступный способ оплаты: СБП или криптовалюта.'},
+ 'uk': {'topup_choose': 'Виберіть суму або введіть свою.\n'
+                        'Потім виберіть спосіб: СБП — комісія 8,5%, криптовалюта — 5%.\n'
+                        'Комісію сплачує покупець понад суму поповнення.',
+        'payment_method_choose': '💳 <b>Виберіть спосіб оплати</b>\n'
+                                 '\n'
+                                 'На баланс надійде: <b>{amount:.2f}₽</b>\n'
+                                 'Комісію сплачує покупець понад цю суму. Підсумок до оплати вказано на сторінці '
+                                 'Platega.',
+        'payment_method_details': 'Спосіб: <b>{method}</b>\n'
+                                  'Комісія покупця: <b>{fee}%</b>\n'
+                                  'На баланс надійде: <b>{amount:.2f}₽</b>\n'
+                                  'Підсумкова сума з комісією вказана на сторінці Platega.',
+        'payment_method_invalid': 'Виберіть доступний спосіб оплати: СБП або криптовалюта.'},
+ 'en': {'topup_choose': 'Choose an amount or enter a custom one.\n'
+                        'Then choose a method: SBP — 8.5% fee, cryptocurrency — 5%.\n'
+                        'The buyer pays the fee on top of the balance amount.',
+        'payment_method_choose': '💳 <b>Choose a payment method</b>\n'
+                                 '\n'
+                                 'Added to your balance: <b>{amount:.2f}₽</b>\n'
+                                 'The buyer pays the fee on top of this amount. The final total is shown on the '
+                                 'Platega payment page.',
+        'payment_method_details': 'Method: <b>{method}</b>\n'
+                                  'Buyer-paid fee: <b>{fee}%</b>\n'
+                                  'Added to your balance: <b>{amount:.2f}₽</b>\n'
+                                  'The final total including the fee is shown on the Platega payment page.',
+        'payment_method_invalid': 'Choose an available payment method: SBP or cryptocurrency.'}}.items():
+    I18N[_lang].update(_texts)
 
 def tr(user_id: int, key: str, **kwargs) -> str:
     lang = get_user_language(user_id)
@@ -878,25 +921,58 @@ async def cb_topup_amount(callback: CallbackQuery, state: FSMContext, bot: Bot):
         amount = float(part)
     except ValueError:
         return
-    await create_topup(callback.message, callback.from_user, amount, bot)
+    if await show_payment_methods(callback, callback.from_user, amount):
+        await state.clear()
 
 
 @dp.message(ProductWizard.topup_custom, F.text)
 async def topup_custom_msg(message: Message, state: FSMContext, bot: Bot):
     try:
-        amount = float((message.text or "").replace(",", ".").strip())
+        amount = money((message.text or "").replace(",", ".").strip())
     except ValueError:
         await message.answer(tr(message.from_user.id, "number"))
         return
-    min_a = float(get_setting("min_topup", "1"))
-    if amount < min_a:
-        await message.answer(tr(message.from_user.id, "minimum", amount=min_a))
+    if await show_payment_methods(message, message.from_user, amount):
+        await state.clear()
+
+
+async def show_payment_methods(target, user, amount):
+    try:
+        amount = money(amount)
+        minimum = money(get_setting("min_topup", "1"))
+    except ValueError:
+        message = target if isinstance(target, Message) else target.message
+        await message.answer(tr(user.id, "number"))
+        return False
+    if amount < minimum:
+        message = target if isinstance(target, Message) else target.message
+        await message.answer(tr(user.id, "minimum", amount=float(minimum)))
+        return False
+    lang = get_user_language(user.id)
+    await safe_edit_or_send(target, tr(user.id, "payment_method_choose", amount=amount),
+                            reply_markup=payment_methods_kb(amount, lang))
+    return True
+
+
+@dp.callback_query(F.data.startswith("topupmethod:"))
+async def cb_topup_method(callback: CallbackQuery, bot: Bot):
+    try:
+        _, method_raw, amount_raw = callback.data.split(":")
+        method = int(method_raw)
+        if method not in METHOD_FEES:
+            raise ValueError("Unsupported method")
+        amount = money(amount_raw)
+    except (ValueError, TypeError):
+        await callback.answer(tr(callback.from_user.id, "payment_method_invalid"), show_alert=True)
         return
-    await state.clear()
-    await create_topup(message, message.from_user, amount, bot)
+    await callback.answer()
+    await create_topup(callback.message, callback.from_user, amount, bot, payment_method=method)
 
 
-async def create_topup(message: Message, user, amount: float, bot: Bot):
+async def create_topup(message: Message, user, amount: float, bot: Bot, payment_method: int = 2):
+    if payment_method not in METHOD_FEES:
+        await message.answer(tr(user.id, "payment_method_invalid"))
+        return
     try:
         amount = float(money(amount))
         minimum = money(get_setting("min_topup", "1"))
@@ -912,7 +988,7 @@ async def create_topup(message: Message, user, amount: float, bot: Bot):
             tr(user.id, "payment_unavailable")
         )
         return
-    payload = f"topup:{user.id}:{amount}"
+    payload = f"topup:{user.id}:{amount}:method:{payment_method}"
     try:
         me = await bot.me()
         ret = f"https://t.me/{me.username}"
@@ -922,7 +998,7 @@ async def create_topup(message: Message, user, amount: float, bot: Bot):
             payload=payload,
             return_url=ret,
             failed_url=ret,
-            payment_method=2,
+            payment_method=payment_method,
             metadata={
                 "userId": str(user.id),
                 "userName": f"@{user.username}" if user.username else str(user.id),
@@ -956,8 +1032,10 @@ async def create_topup(message: Message, user, amount: float, bot: Bot):
         rows.append([InlineKeyboardButton(text=tr(user.id, "pay"), url=redirect)])
     rows.append([InlineKeyboardButton(text=tr(user.id, "check"), callback_data=f"paystatus:{tx_id}")])
     rows.append([InlineKeyboardButton(text=tr(user.id, "to_profile"), callback_data="profile")])
+    label, fee = method_info(payment_method, get_user_language(user.id))
     await message.answer(
-        tr(user.id, "invoice", amount=amount, tx_id=tx_id),
+        tr(user.id, "invoice", amount=amount, tx_id=tx_id) + "\n\n" +
+        tr(user.id, "payment_method_details", method=label, fee=fee, amount=amount),
         reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
     )
 

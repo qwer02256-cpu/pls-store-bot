@@ -240,3 +240,52 @@ class MinimumTopupTests(unittest.IsolatedAsyncioTestCase):
             with db.db() as conn:
                 rows=conn.execute('SELECT amount FROM payments').fetchall()
                 self.assertEqual([r['amount'] for r in rows],[1])
+
+
+class PaymentMethodTests(unittest.IsolatedAsyncioTestCase):
+    def test_picker_displays_only_enabled_methods_with_fees_in_all_languages(self):
+        from decimal import Decimal
+        from services.ui import payment_methods_kb
+        for lang in ('ru','uk','en'):
+            with patch('services.ui.get_setting',side_effect=lambda key,default='':default):
+                rows=payment_methods_kb(Decimal('1.25'),lang).inline_keyboard
+            self.assertEqual(rows[0][0].callback_data,'topupmethod:2:1.25')
+            self.assertEqual(rows[1][0].callback_data,'topupmethod:13:1.25')
+            self.assertIn('8.5%' if lang=='en' else '8,5%',rows[0][0].text)
+            self.assertIn('5%',rows[1][0].text)
+            self.assertEqual(rows[-1][0].callback_data,'topup')
+
+    async def test_both_methods_send_original_amount_and_show_selected_fee(self):
+        for method,fee in [(2,'8,5%'),(13,'5%')]:
+            with tempfile.TemporaryDirectory() as tmp,patch.object(db,'DB_PATH',Path(tmp)/'db'):
+                db.init_db()
+                provider=SimpleNamespace(create_payment=AsyncMock(return_value={'id':'tx','redirect':'https://app.platega.io/pay/tx','status':'PENDING'}))
+                bot=SimpleNamespace(me=AsyncMock(return_value=SimpleNamespace(username='store_bot')))
+                message=SimpleNamespace(answer=AsyncMock())
+                with patch.object(main,'platega',provider):
+                    await main.create_topup(message,SimpleNamespace(id=2,username=None,first_name='Buyer'),100,bot,payment_method=method)
+                self.assertEqual(provider.create_payment.call_args.kwargs['payment_method'],method)
+                self.assertEqual(provider.create_payment.call_args.kwargs['amount'],100)
+                text=message.answer.call_args.args[0]
+                self.assertIn(fee,text)
+                self.assertIn('На баланс поступит: <b>100.00₽</b>',text)
+                with db.db() as conn:self.assertEqual(conn.execute('SELECT amount FROM payments').fetchone()[0],100)
+
+    async def test_amount_selection_does_not_create_invoice_before_method_choice(self):
+        with tempfile.TemporaryDirectory() as tmp,patch.object(db,'DB_PATH',Path(tmp)/'db'):
+            db.init_db();db.ensure_user(2)
+            callback=SimpleNamespace(answer=AsyncMock(),data='topup:100',from_user=SimpleNamespace(id=2))
+            state=SimpleNamespace(clear=AsyncMock())
+            with patch.object(main,'safe_edit_or_send',AsyncMock()) as render,patch.object(main,'create_topup',AsyncMock()) as create:
+                await main.cb_topup_amount(callback,state,SimpleNamespace())
+                create.assert_not_awaited()
+                self.assertIn('100.00₽',render.call_args.args[1])
+                self.assertIn('8,5%',render.call_args.kwargs['reply_markup'].inline_keyboard[0][0].text)
+
+    async def test_disabled_or_invalid_method_never_creates_invoice(self):
+        callback=SimpleNamespace(answer=AsyncMock(),from_user=SimpleNamespace(id=2))
+        with patch.object(main,'tr',return_value='Choose a method'),patch.object(main,'create_topup',AsyncMock()) as create:
+            for value in ['topupmethod:11:100','topupmethod:2:NaN','topupmethod:13:-1']:
+                callback.data=value
+                await main.cb_topup_method(callback,SimpleNamespace())
+            create.assert_not_awaited()
