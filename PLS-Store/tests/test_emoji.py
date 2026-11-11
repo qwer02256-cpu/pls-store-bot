@@ -88,7 +88,22 @@ class EmojiTests(unittest.IsolatedAsyncioTestCase):
             save.assert_called_once()
             self.assertEqual(save.call_args.args[0], CACHE_KEY)
             self.assertEqual(self.mw.emoji_id('⬅️'), '777')
-            api.get_sticker_set.assert_awaited_once_with(name='PLSstoreemoje', request_timeout=20)
+            self.assertEqual([c.kwargs['name'] for c in api.get_sticker_set.await_args_list], ['PLSstoreemoje', 'PLSStoreFlags'])
+
+    async def test_dedicated_flags_override_duplicates_and_skip_repainting(self):
+        def sticker(emoji, emoji_id, repaint=False):
+            return SimpleNamespace(emoji=emoji, custom_emoji_id=emoji_id, needs_repainting=repaint)
+        primary = SimpleNamespace(sticker_type='custom_emoji', stickers=[
+            sticker('👤', '111'), sticker('🇷🇺', '201'), sticker('🇺🇦', '202', True)])
+        flags = SimpleNamespace(sticker_type='custom_emoji', stickers=[
+            sticker('🇷🇺', '301'), sticker('🇺🇦', '302'), sticker('🇬🇧', '303', True), sticker('👤', '999')])
+        api = SimpleNamespace(get_sticker_set=AsyncMock(side_effect=[primary, flags]))
+        with patch('services.emoji.set_setting'), patch.dict('os.environ', {'CUSTOM_EMOJI_PACKS': 'PLSstoreemoje'}):
+            await self.mw.refresh(api)
+        self.assertEqual(self.mw.emoji_id('👤'), '111')
+        self.assertEqual(self.mw.emoji_id('🇷🇺'), '301')
+        self.assertEqual(self.mw.emoji_id('🇺🇦'), '302')
+        self.assertIsNone(self.mw.emoji_id('🇬🇧'))
 
     async def test_refresh_failure_preserves_cached_ids(self):
         api = SimpleNamespace(get_sticker_set=AsyncMock(side_effect=RuntimeError('unavailable')))

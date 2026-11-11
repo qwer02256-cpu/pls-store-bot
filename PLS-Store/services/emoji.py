@@ -16,6 +16,7 @@ from services.db import get_setting, set_setting
 log = logging.getLogger(__name__)
 CACHE_KEY = "published_custom_emoji"
 DEFAULT_PACK = "PLSstoreemoje"
+FLAGS_PACK = "PLSStoreFlags"
 # Semantic button icons can differ from the ordinary emoji used in their label.
 BUTTON_EMOJI = {
     "profile": "👤", "catalog": "🛍", "catalog:plugins": "🧩",
@@ -54,7 +55,10 @@ class PackEmojiMiddleware(BaseRequestMiddleware):
 
     async def refresh(self, bot) -> int:
         ids = {}
-        names = os.getenv("CUSTOM_EMOJI_PACKS", DEFAULT_PACK).split(",")
+        names = [raw.strip().rstrip("/").rsplit("/", 1)[-1]
+                 for raw in os.getenv("CUSTOM_EMOJI_PACKS", DEFAULT_PACK).split(",") if raw.strip()]
+        if FLAGS_PACK not in names:
+            names.append(FLAGS_PACK)
         for raw_name in names:
             name = raw_name.strip().rstrip("/").rsplit("/", 1)[-1]
             if not name:
@@ -64,7 +68,15 @@ class PackEmojiMiddleware(BaseRequestMiddleware):
                 raise ValueError(f"{name} is not a custom emoji set")
             for sticker in sticker_set.stickers:
                 if sticker.emoji and sticker.custom_emoji_id and str(sticker.custom_emoji_id).isdigit():
-                    ids.setdefault(normalized(sticker.emoji), str(sticker.custom_emoji_id))
+                    emoji = normalized(sticker.emoji)
+                    is_flag = re.fullmatch(r"[🇦-🇿]{2}", emoji) is not None
+                    if is_flag and getattr(sticker, "needs_repainting", False):
+                        log.warning("Skipping recolored flag in emoji set %s", name)
+                        continue
+                    if is_flag and name == FLAGS_PACK:
+                        ids[emoji] = str(sticker.custom_emoji_id)
+                    else:
+                        ids.setdefault(emoji, str(sticker.custom_emoji_id))
         if not ids:
             raise ValueError("Published emoji set contains no usable custom emoji IDs")
         set_setting(CACHE_KEY, json.dumps(ids, ensure_ascii=False))
