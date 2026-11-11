@@ -327,10 +327,10 @@ def get_faq(active_only: bool = True):
 def get_user_language(user_id: int) -> str:
     with db() as conn:
         row = conn.execute("SELECT language FROM users WHERE user_id=?", (user_id,)).fetchone()
-    return row["language"] if row and row["language"] in ("ru", "en") else "ru"
+    return row["language"] if row and row["language"] in ("ru", "uk", "en") else "ru"
 
 
 def set_user_language(user_id: int, language: str) -> None:
-    language = language if language in ("ru", "en") else "ru"
+    language = language if language in ("ru", "uk", "en") else "ru"
     with db() as conn:
         conn.execute("UPDATE users SET language=? WHERE user_id=?", (language, user_id))

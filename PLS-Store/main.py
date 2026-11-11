@@ -70,6 +70,7 @@ from services.ui import (
     topup_amounts_kb,
     profile_text,
     support_button,
+    language_kb,
     btn,
     design_button,
 )
@@ -137,7 +138,7 @@ I18N = {
     "ru": {
         "welcome": "<b>PLS Store</b>\nПлагины и дополнения для FunPayCardinal\n\nДобро пожаловать, {first_name}!",
         "license_title": "📜 <b>Лицензионное соглашение</b>\n\nПеред использованием магазина необходимо принять условия.",
-        "license_accept": "Спасибо! Условия приняты.", "language_title": "🌐 <b>Выберите язык</b>\n\nЯзык сохраняется только для вашего аккаунта.",
+        "license_accept": "Спасибо! Условия приняты.", "language_title": "<b>Выберите язык</b>",
         "language_saved": "Язык изменён на русский.", "back": "⬅️ Назад", "home": "🏠 Главное меню",
         "shop": "🛒 Магазин PLS Store", "no_products": "Пока товаров нет. Загляни позже или напиши в поддержку.",
         "choose_product": "Выбери интересующий товар:", "unavailable": "Этот товар больше недоступен.",
@@ -164,7 +165,7 @@ I18N = {
     "en": {
         "welcome": "<b>PLS Store</b>\nPlugins and add-ons for FunPayCardinal\n\nWelcome, {first_name}!",
         "license_title": "📜 <b>License agreement</b>\n\nPlease accept the terms before using the store.",
-        "license_accept": "Thank you! Terms accepted.", "language_title": "🌐 <b>Select language</b>\n\nYour choice is saved for your account only.",
+        "license_accept": "Thank you! Terms accepted.", "language_title": "<b>Select language</b>",
         "language_saved": "Language changed to English.", "back": "⬅️ Back", "home": "🏠 Main menu",
         "shop": "🛒 PLS Store", "no_products": "There are no products yet. Please check back later or contact support.",
         "choose_product": "Choose a product:", "unavailable": "This product is no longer available.",
@@ -189,6 +190,73 @@ I18N = {
         "license_url": "📜 License terms", "license_accept_button": "✅ I accept the terms",
     }
 }
+
+I18N["uk"] = {'welcome': '<b>PLS Store</b>\nПлагіни та доповнення для FunPayCardinal\n\nЛаскаво просимо, {first_name}!',
+ 'license_title': '📜 <b>Ліцензійна угода</b>\n\nПрийміть умови, щоб користуватися магазином.',
+ 'license_accept': 'Дякуємо! Умови прийнято.',
+ 'language_title': '<b>Виберіть мову</b>',
+ 'language_saved': 'Мову змінено на українську.',
+ 'back': '⬅️ Назад',
+ 'home': '🏠 Головне меню',
+ 'shop': '🛒 Магазин PLS Store',
+ 'no_products': 'Товарів поки немає. Завітайте пізніше або напишіть у підтримку.',
+ 'choose_product': 'Виберіть товар:',
+ 'unavailable': 'Цей товар більше недоступний.',
+ 'buy': '🛒 Купити за {price:.0f}₽',
+ 'manual': '📩 Залишити заявку (вручну)',
+ 'back_catalog': '⬅️ Назад до каталогу',
+ 'purchases': '🛒 <b>Мої покупки</b>',
+ 'empty_purchases': 'Поки порожньо. Завітайте до магазину!',
+ 'balance': '💰 Баланс',
+ 'spent': '💸 Усього витрачено',
+ 'purchase_count': '🛒 Покупок',
+ 'promo_enter': '🎟 Введіть промокод:',
+ 'promo_bad': 'Промокод не знайдено або він неактивний.',
+ 'promo_used': 'Ви вже використали цей промокод.',
+ 'promo_limit': 'Ліміт використань вичерпано.',
+ 'promo_ok': '✅ Промокод застосовано! Нараховано <b>{bonus:.0f}₽</b>.',
+ 'topup_title': '💳 Поповнення балансу',
+ 'topup_choose': 'Виберіть суму або введіть свою.\n'
+                 'Оплата через Platega (СБП / картки).\n'
+                 'Кошти зараховуються автоматично після підтвердження.',
+ 'topup_custom': 'Введіть суму поповнення в рублях (мінімум {minimum}₽):',
+ 'number': 'Введіть число, наприклад 500',
+ 'minimum': 'Мінімальна сума: {amount:.0f}₽',
+ 'payment_unavailable': '⚠️ Платіжну систему ще не налаштовано.',
+ 'payment_error': 'Помилка створення платежу: {error}',
+ 'pay': '💳 Перейти до оплати',
+ 'check': '🔄 Перевірити статус',
+ 'to_profile': '⬅️ До профілю',
+ 'invoice': '💳 Рахунок на <b>{amount:.0f}₽</b> створено.\n'
+            'ID: <code>{tx_id}</code>\n'
+            '\n'
+            'Натисніть кнопку оплати. Після успішної оплати баланс поповниться автоматично.',
+ 'status': 'Статус платежу <code>{tx_id}</code>: <b>{status}</b>',
+ 'faq_title': '❓ FAQ — часті запитання',
+ 'faq': '🗓 <b>Як купити?</b>\n'
+        'Профіль → «Поповнити», потім Магазин → виберіть товар → оплата з балансу.\n'
+        '\n'
+        '💲 <b>Як платити?</b>\n'
+        'СБП та доступні способи оплати Platega. Баланс зараховується автоматично.\n'
+        '\n'
+        '🚀 <b>Коли надійде товар?</b>\n'
+        'Після успішної оплати з балансу товар з’явиться в «Мої покупки».\n'
+        '\n'
+        '☑️ <b>Гарантія та заміна?</b>\n'
+        'З питань заміни та гарантії звертайтеся до підтримки.\n'
+        '\n'
+        '🎧 <b>Підтримка</b>\n'
+        'Кнопка «Підтримка» в головному меню.',
+ 'documents': '<b>📄 Документи</b>\n━━━━━━━━━━━━━━━━━━━━\n\nПравила сервісу, обробка даних та актуальні ціни.',
+ 'support': '💬 <b>Підтримка PLS Store</b>\n\nНатисніть кнопку нижче, щоб написати продавцю.',
+ 'support_unset': '💬 Підтримку ще не налаштовано.',
+ 'write_support': '💬 Написати в підтримку',
+ 'reviews': '⭐ Відкрити відгуки',
+ 'reviews_title': '⭐ Відгуки покупців PLS Store',
+ 'reviews_unset': '⭐ Посилання на відгуки ще не налаштовано.',
+ 'api_info': '⚡ <b>API</b>\n\nРозділ API ще в розробці.\nЗверніться до підтримки для доступу.',
+ 'license_url': '📜 Умови ліцензії',
+ 'license_accept_button': '✅ Приймаю умови'}
 
 def tr(user_id: int, key: str, **kwargs) -> str:
     lang = get_user_language(user_id)
@@ -251,7 +319,7 @@ def banner_path(key: str) -> Path | None:
         if p.is_file():
             return p
     # Uploaded banners take precedence over bundled section defaults.
-    if key in {"profile", "faq"}:
+    if key in {"profile", "faq", "language"}:
         bundled = ASSETS_DIR / f"{key}.png"
         if bundled.is_file():
             return bundled
@@ -363,7 +431,7 @@ async def show_license_gate(target, user_id: int) -> None:
 # ─── home / catalog / product ───────────────────────────────────────────────
 async def show_home(target, first_name: str):
     lang = get_user_language(target.from_user.id if isinstance(target, CallbackQuery) else target.from_user.id)
-    welcome_template = get_setting("welcome_text", I18N[lang]["welcome"]) if lang == "ru" else I18N["en"]["welcome"]
+    welcome_template = get_setting("welcome_text", I18N[lang]["welcome"]) if lang == "ru" else I18N[lang]["welcome"]
     safe_name = html.escape(first_name)
     try:
         text = welcome_template.replace("{first_name}", safe_name)
@@ -926,20 +994,17 @@ def documents_keyboard() -> InlineKeyboardMarkup:
 async def cb_language(callback: CallbackQuery):
     await callback.answer()
     lang = get_user_language(callback.from_user.id)
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=("🇷🇺 Русский ✓" if lang == "ru" else "🇷🇺 Русский"), callback_data="lang:set:ru")],
-        [InlineKeyboardButton(text=("🇬🇧 English ✓" if lang == "en" else "🇬🇧 English"), callback_data="lang:set:en")],
-        [InlineKeyboardButton(text=tr(callback.from_user.id, "back"), callback_data="home")],
-    ])
-    await safe_edit_or_send(callback, tr(callback.from_user.id, "language_title"), reply_markup=kb)
+    kb = language_kb(lang)
+    await safe_edit_or_send(callback, tr(callback.from_user.id, "language_title"), reply_markup=kb, photo=banner_path("language"))
 
 
 @dp.callback_query(F.data.startswith("lang:set:"))
 async def cb_language_set(callback: CallbackQuery):
     lang = callback.data.rsplit(":", 1)[-1]
-    if lang not in ("ru", "en"):
+    if lang not in ("ru", "uk", "en"):
         await callback.answer("Invalid language", show_alert=True)
         return
+    ensure_user(callback.from_user.id, callback.from_user.username, callback.from_user.first_name)
     set_user_language(callback.from_user.id, lang)
     await callback.answer(I18N[lang]["language_saved"], show_alert=True)
     await show_home(callback, callback.from_user.first_name or "customer")
@@ -949,7 +1014,7 @@ async def cb_language_set(callback: CallbackQuery):
 async def cb_faq(callback: CallbackQuery):
     await callback.answer()
     markup = InlineKeyboardMarkup(inline_keyboard=[
-        [design_button("btn_documents", ("📄 Documents" if get_user_language(callback.from_user.id) == "en" else "📄 Документы"), "documents", "primary")],
+        [design_button("btn_documents", ("📄 Documents" if get_user_language(callback.from_user.id) == "en" else ("📄 Документи" if get_user_language(callback.from_user.id) == "uk" else "📄 Документы")), "documents", "primary")],
         [design_button("btn_back", ("« Back" if get_user_language(callback.from_user.id) == "en" else "« Назад"), "home", "danger")],
     ])
     await safe_edit_or_send(callback, f"<b>{tr(callback.from_user.id, 'faq_title')}</b>\n━━━━━━━━━━━━━━━━━━━━\n\n{tr(callback.from_user.id, 'faq')}", reply_markup=markup, photo=banner_path("faq"))
@@ -960,9 +1025,9 @@ async def cb_documents(callback: CallbackQuery):
     await callback.answer()
     lang = get_user_language(callback.from_user.id)
     titles = [
-        (("🔒 Privacy Policy" if lang == "en" else "🔒 Политика конфиденциальности"), DOCUMENTS[0][1]),
-        (("📜 User Agreement" if lang == "en" else "📜 Пользовательское соглашение"), DOCUMENTS[1][1]),
-        (("💵 Products and Pricing" if lang == "en" else "💵 Товары и тарифы"), DOCUMENTS[2][1]),
+        (("🔒 Privacy Policy" if lang == "en" else ("🔒 Політика конфіденційності" if lang == "uk" else "🔒 Политика конфиденциальности")), DOCUMENTS[0][1]),
+        (("📜 User Agreement" if lang == "en" else ("📜 Угода користувача" if lang == "uk" else "📜 Пользовательское соглашение")), DOCUMENTS[1][1]),
+        (("💵 Products and Pricing" if lang == "en" else ("💵 Товари й тарифи" if lang == "uk" else "💵 Товары и тарифы")), DOCUMENTS[2][1]),
     ]
     rows = [[InlineKeyboardButton(text=title, url=url)] for title, url in titles]
     rows += [[support_button(lang)],
@@ -1143,7 +1208,7 @@ async def adm_design_save(message: Message, state: FSMContext):
 
 
 # --- banners ---
-BANNER_KEYS = ["home", "profile", "shop", "faq", "topup"]
+BANNER_KEYS = ["home", "profile", "shop", "faq", "topup", "language"]
 
 
 @dp.callback_query(F.data == "adm:banners")

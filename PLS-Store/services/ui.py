@@ -31,7 +31,7 @@ def design_button(key: str, default: str, callback_data: str, style: str | None 
 
 
 def support_button(lang: str = "ru") -> InlineKeyboardButton:
-    label = "🎧 Support" if lang == "en" else "🎧 Поддержка"
+    label = {"ru": "🎧 Поддержка", "uk": "🎧 Підтримка", "en": "🎧 Support"}.get(lang, "🎧 Поддержка")
     button = design_button("btn_support", label, "support", "danger", label)
     username = get_setting("support_username", SUPPORT_USERNAME).strip().lstrip("@")
     if username:
@@ -40,11 +40,24 @@ def support_button(lang: str = "ru") -> InlineKeyboardButton:
     return button
 
 
+def language_kb(lang: str = "ru") -> InlineKeyboardMarkup:
+    def choice(code: str, label: str) -> InlineKeyboardButton:
+        return InlineKeyboardButton(
+            text=label + (" ✓" if lang == code else ""), callback_data=f"lang:set:{code}"
+        )
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [choice("ru", "🇷🇺 Русский"), choice("uk", "🇺🇦 Українська")],
+        [choice("en", "🇬🇧 English")],
+        [design_button("btn_back", "« Back" if lang == "en" else "« Назад", "home", "danger")],
+    ])
+
+
 def main_menu_kb(lang: str = "ru") -> InlineKeyboardMarkup:
     # Layout and colors match the supplied reference: blue/green pairs,
     # followed by a full-width red support button.
     labels = {
         "ru": ("👤 Профиль", "🛒 Магазин", "🌐 Язык", "❓ FAQ", "🎧 Поддержка"),
+        "uk": ("👤 Профіль", "🛒 Магазин", "🌐 Мова", "❓ FAQ", "🎧 Підтримка"),
         "en": ("👤 Profile", "🛒 Shop", "🌐 Language", "❓ FAQ", "🎧 Support"),
     }
     profile, shop, language, faq, support = labels.get(lang, labels["ru"])
@@ -58,6 +71,7 @@ def main_menu_kb(lang: str = "ru") -> InlineKeyboardMarkup:
 def profile_kb(lang: str = "ru") -> InlineKeyboardMarkup:
     labels = {
         "ru": ("💳 Пополнить баланс", "🛒 Покупки", "⚡ API", "🎁 Промокод", "🔗 Рефералка", "« Назад"),
+        "uk": ("💳 Поповнити баланс", "🛒 Покупки", "⚡ API", "🎁 Промокод", "🔗 Реферали", "« Назад"),
         "en": ("💳 Add balance", "🛒 My purchases", "⚡ API", "🎟 Promo code", "🔗 Referrals", "⬅️ Back"),
     }
     topup, purchases, api, promo, referral, back = labels.get(lang, labels["ru"])
@@ -81,15 +95,15 @@ def profile_text(user_id: int, tg_user, lang: str = "ru") -> str:
             "SELECT COUNT(*) FROM users WHERE referrer_id=?", (user_id,)
         ).fetchone()[0]
     en = lang == "en"
-    title = "👤 Profile" if en else btn("profile_title", "👤 Профиль")
+    title = "👤 Profile" if en else ("👤 Профіль" if lang == "uk" else btn("profile_title", "👤 Профиль"))
     return (
         f"<b>{html.escape(title)}</b>\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
         f"💲 {'Balance' if en else 'Баланс'}: <b>{u['balance']:.0f}₽</b>\n"
-        f"🧾 {'Total spent' if en else 'Всего потрачено'}: {u['total_spent']:.0f}₽\n"
+        f"🧾 {'Total spent' if en else ('Усього витрачено' if lang == 'uk' else 'Всего потрачено')}: {u['total_spent']:.0f}₽\n"
         f"🛒 {'Purchases' if en else 'Покупок'}: {u['purchases_count']}\n"
-        f"🔗 {'Referrals' if en else 'Рефералов'}: {referrals} · "
-        f"{'earned' if en else 'заработано'} {u['referral_earnings']:.0f}₽\n\n"
+        f"🔗 {'Referrals' if en else ('Рефералів' if lang == 'uk' else 'Рефералов')}: {referrals} · "
+        f"{'earned' if en else ('зароблено' if lang == 'uk' else 'заработано')} {u['referral_earnings']:.0f}₽\n\n"
         f"🆔 {'Your ID' if en else 'Ваш ID'}: <code>{user_id}</code>"
     )
 
@@ -105,6 +119,6 @@ def topup_amounts_kb(lang: str = "ru") -> InlineKeyboardMarkup:
             row = []
     if row:
         rows.append(row)
-    rows.append([InlineKeyboardButton(text=("✏️ Custom amount" if lang == "en" else "✏️ Своя сумма"), callback_data="topup:custom")])
+    rows.append([InlineKeyboardButton(text=("✏️ Custom amount" if lang == "en" else ("✏️ Своя сума" if lang == "uk" else "✏️ Своя сумма")), callback_data="topup:custom")])
     rows.append([design_button("btn_back", ("⬅️ Back" if lang == "en" else "⬅️ Назад"), "profile", text_override=("⬅️ Back" if lang == "en" else "⬅️ Назад"))])
     return InlineKeyboardMarkup(inline_keyboard=rows)
