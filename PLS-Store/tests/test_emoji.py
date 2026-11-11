@@ -1,4 +1,6 @@
+import gzip
 import json
+from pathlib import Path
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -104,6 +106,36 @@ class EmojiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.mw.emoji_id('🇷🇺'), '301')
         self.assertEqual(self.mw.emoji_id('🇺🇦'), '302')
         self.assertIsNone(self.mw.emoji_id('🇬🇧'))
+
+    async def test_wave_matches_uploaded_tgs_despite_wrong_assigned_emoji(self):
+        actual_file = Path(__file__).resolve().parents[1] / 'emoji-pack' / '52_wave.tgs'
+        uploaded = SimpleNamespace(emoji='✋', custom_emoji_id='123456', is_animated=True, file_id='wave-file')
+        primary = SimpleNamespace(sticker_type='custom_emoji', stickers=[uploaded])
+        flags = SimpleNamespace(sticker_type='custom_emoji', stickers=[])
+        async def download(file_id, destination, timeout):
+            self.assertEqual(file_id, 'wave-file')
+            destination.write(actual_file.read_bytes())
+        api = SimpleNamespace(get_sticker_set=AsyncMock(side_effect=[primary, flags]), download=AsyncMock(side_effect=download))
+        with patch('services.emoji.set_setting'), patch.dict('os.environ', {'CUSTOM_EMOJI_PACKS':'PLSstoreemoje'}):
+            await self.mw.refresh(api)
+        self.assertEqual(self.mw.emoji_id('👋'), '123456')
+        self.assertIn('emoji-id="123456"', self.mw.render_html('👋 С возвращением'))
+
+    async def test_skin_tone_wave_is_normalized_without_download(self):
+        primary = SimpleNamespace(sticker_type='custom_emoji', stickers=[
+            SimpleNamespace(emoji='👋🏻', custom_emoji_id='123456')])
+        api = SimpleNamespace(get_sticker_set=AsyncMock(return_value=primary), download=AsyncMock())
+        with patch('services.emoji.set_setting'):
+            await self.mw.refresh(api)
+        self.assertEqual(self.mw.emoji_id('👋'), '123456')
+        api.download.assert_not_awaited()
+
+    async def test_unrelated_tgs_is_not_used_for_greeting(self):
+        async def download(file_id, destination, timeout):
+            destination.write(gzip.compress(json.dumps({'layers': []}).encode()))
+        api = SimpleNamespace(download=AsyncMock(side_effect=download))
+        sticker = SimpleNamespace(is_animated=True, file_id='other', custom_emoji_id='123')
+        self.assertIsNone(await self.mw._find_wave_file(api,[sticker]))
 
     async def test_refresh_failure_preserves_cached_ids(self):
         api = SimpleNamespace(get_sticker_set=AsyncMock(side_effect=RuntimeError('unavailable')))

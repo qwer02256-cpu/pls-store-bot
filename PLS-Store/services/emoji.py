@@ -1,11 +1,14 @@
 """Load published Telegram emoji IDs and apply them to outgoing HTML and buttons."""
 from __future__ import annotations
 
+import gzip
 import html
+import io
 import json
 import logging
 import os
 import re
+from pathlib import Path
 
 from aiogram.client.default import Default
 from aiogram.client.session.middlewares.base import BaseRequestMiddleware
@@ -33,7 +36,7 @@ ALIASES = {
 
 
 def normalized(emoji: str) -> str:
-    return emoji.replace("\ufe0f", "")
+    return re.sub(r"[\U0001f3fb-\U0001f3ff]", "", emoji.replace("\ufe0f", ""))
 
 
 class PackEmojiMiddleware(BaseRequestMiddleware):
@@ -53,8 +56,32 @@ class PackEmojiMiddleware(BaseRequestMiddleware):
         alternatives = [re.escape(key) + "\ufe0f?" for key in sorted(self.render_ids, key=len, reverse=True)]
         self.pattern = re.compile("|".join(alternatives)) if alternatives else None
 
+    async def _find_wave_file(self, bot, stickers):
+        """Recognize our actual TGS even when assigned the wrong ordinary emoji."""
+        path = Path(__file__).resolve().parents[1] / "emoji-pack" / "52_wave.tgs"
+        if not path.is_file() or not hasattr(bot, "download"):
+            return None
+        expected = json.loads(gzip.decompress(path.read_bytes()))
+        # New uploads are appended. Limit work if the file has not been uploaded yet.
+        for sticker in reversed(stickers[-8:]):
+            if not getattr(sticker, "is_animated", False) or not getattr(sticker, "file_id", None):
+                continue
+            emoji_id = str(getattr(sticker, "custom_emoji_id", ""))
+            if not emoji_id.isdigit():
+                continue
+            try:
+                buffer = io.BytesIO()
+                await bot.download(sticker.file_id, destination=buffer, timeout=10)
+                actual = json.loads(gzip.decompress(buffer.getvalue()))
+                if all(actual.get(key) == expected.get(key) for key in ("w", "h", "fr", "op", "layers")):
+                    return emoji_id
+            except Exception as exc:
+                log.warning("Could not identify greeting animation: %s", type(exc).__name__)
+        return None
+
     async def refresh(self, bot) -> int:
         ids = {}
+        wave_candidates = []
         names = [raw.strip().rstrip("/").rsplit("/", 1)[-1]
                  for raw in os.getenv("CUSTOM_EMOJI_PACKS", DEFAULT_PACK).split(",") if raw.strip()]
         if FLAGS_PACK not in names:
@@ -66,6 +93,8 @@ class PackEmojiMiddleware(BaseRequestMiddleware):
             sticker_set = await bot.get_sticker_set(name=name, request_timeout=20)
             if sticker_set.sticker_type != "custom_emoji":
                 raise ValueError(f"{name} is not a custom emoji set")
+            if name != FLAGS_PACK:
+                wave_candidates.extend(sticker_set.stickers)
             for sticker in sticker_set.stickers:
                 if sticker.emoji and sticker.custom_emoji_id and str(sticker.custom_emoji_id).isdigit():
                     emoji = normalized(sticker.emoji)
@@ -77,6 +106,10 @@ class PackEmojiMiddleware(BaseRequestMiddleware):
                         ids[emoji] = str(sticker.custom_emoji_id)
                     else:
                         ids.setdefault(emoji, str(sticker.custom_emoji_id))
+        if "👋" not in ids:
+            wave_id = await self._find_wave_file(bot, wave_candidates)
+            if wave_id:
+                ids["👋"] = wave_id
         if not ids:
             raise ValueError("Published emoji set contains no usable custom emoji IDs")
         set_setting(CACHE_KEY, json.dumps(ids, ensure_ascii=False))

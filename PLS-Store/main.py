@@ -1156,7 +1156,8 @@ async def cmd_sync_emojis(message: Message, bot: Bot):
         log.warning("Emoji refresh failed: %s", type(exc).__name__)
         await message.answer("Не удалось загрузить набор эмодзи. Проверьте CUSTOM_EMOJI_PACKS и доступ бота к Telegram.")
         return
-    await message.answer(f"✅ Набор обновлён: {count} эмодзи. Откройте главное меню заново.")
+    wave_status = "Анимированная ладонь подключена." if middleware.emoji_id("👋") else "Ладонь 👋 в наборе пока не найдена."
+    await message.answer(f"✅ Набор обновлён: {count} эмодзи.\n{wave_status}\nОткройте главное меню заново.")
 
 
 @dp.message(Command("admin"))
