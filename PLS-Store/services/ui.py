@@ -30,9 +30,9 @@ def design_button(key: str, default: str, callback_data: str, style: str | None 
     return InlineKeyboardButton(**kwargs)
 
 
-def support_button(lang: str = "ru") -> InlineKeyboardButton:
+def support_button(lang: str = "ru", style: str | None = "danger") -> InlineKeyboardButton:
     label = {"ru": "🎧 Поддержка", "uk": "🎧 Підтримка", "en": "🎧 Support"}.get(lang, "🎧 Поддержка")
-    button = design_button("btn_support", label, "support", "danger", label)
+    button = design_button("btn_support", label, "support", style, label)
     username = get_setting("support_username", SUPPORT_USERNAME).strip().lstrip("@")
     if username:
         button.callback_data = None

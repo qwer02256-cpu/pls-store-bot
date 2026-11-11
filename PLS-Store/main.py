@@ -15,6 +15,7 @@ from aiohttp import web
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -25,6 +26,7 @@ from aiogram.types import (
     InlineKeyboardMarkup,
     InlineKeyboardButton,
     FSInputFile,
+    InputMediaPhoto,
     BotCommand,
     BotCommandScopeDefault,
     BotCommandScopeChat,
@@ -319,7 +321,7 @@ def banner_path(key: str) -> Path | None:
         if p.is_file():
             return p
     # Uploaded banners take precedence over bundled section defaults.
-    if key in {"profile", "faq", "language"}:
+    if key in {"profile", "faq", "language", "shop"}:
         bundled = ASSETS_DIR / f"{key}.png"
         if bundled.is_file():
             return bundled
@@ -329,22 +331,31 @@ def banner_path(key: str) -> Path | None:
 
 
 async def safe_edit_or_send(target, text: str, reply_markup=None, photo: Path | None = None):
-    """Edit message or send new one. Supports photo banners."""
-    if isinstance(target, Message):
-        message = target
-    else:
-        message = target.message
+    """Update callback screens in place to avoid Telegram's deletion animation."""
+    message = target if isinstance(target, Message) else target.message
+    if not isinstance(target, Message):
         try:
-            await message.delete()
-        except Exception:
-            pass
-
+            if photo and photo.is_file():
+                await message.edit_media(
+                    media=InputMediaPhoto(media=FSInputFile(photo), caption=text),
+                    reply_markup=reply_markup,
+                )
+            elif message.photo and len(text) <= 1024:
+                # Keep the current banner for text-only subsections.
+                await message.edit_caption(caption=text, reply_markup=reply_markup)
+            elif not message.photo:
+                await message.edit_text(text, reply_markup=reply_markup, link_preview_options=NO_PREVIEW)
+            else:
+                # Telegram cannot turn a photo message into a text message.
+                await message.answer(text, reply_markup=reply_markup, link_preview_options=NO_PREVIEW)
+                await message.edit_reply_markup(reply_markup=None)
+            return
+        except TelegramBadRequest as exc:
+            if "message is not modified" in exc.message.lower():
+                return
+            # Old or otherwise uneditable messages can still open a fresh screen.
     if photo and photo.is_file():
-        await message.answer_photo(
-            photo=FSInputFile(photo),
-            caption=text,
-            reply_markup=reply_markup,
-        )
+        await message.answer_photo(photo=FSInputFile(photo), caption=text, reply_markup=reply_markup)
     else:
         await message.answer(text, reply_markup=reply_markup, link_preview_options=NO_PREVIEW)
 
@@ -442,10 +453,27 @@ async def show_home(target, first_name: str):
 
 
 async def render_catalog(target) -> None:
+    user_id = target.from_user.id
+    lang = get_user_language(user_id)
+    labels = {
+        "ru": ("Выберите категорию.", "Плагины для FunPayCardinal"),
+        "uk": ("Виберіть категорію.", "Плагіни для FunPayCardinal"),
+        "en": ("Choose a category.", "Plugins for FunPayCardinal"),
+    }
+    prompt, category = labels[lang]
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"🧩 {category} ›", callback_data="catalog:plugins")],
+        [design_button("btn_back", "« Back" if lang == "en" else "« Назад", "home", "danger")],
+    ])
+    text = f"<b>{tr(user_id, 'shop')}</b>\n━━━━━━━━━━━━━━━━━━━━\n\n{prompt}"
+    await safe_edit_or_send(target, text, reply_markup=markup, photo=banner_path("shop"))
+
+
+async def render_plugins(target) -> None:
     products = get_products()
     if not products:
         text = f"🛒 <b>{tr(target.from_user.id, 'shop')}</b>\n\n{tr(target.from_user.id, 'no_products')}"
-        markup = back_kb("home")
+        markup = InlineKeyboardMarkup(inline_keyboard=[[design_button("btn_back", tr(target.from_user.id, "back"), "catalog", "danger")]])
     else:
         builder = InlineKeyboardBuilder()
         for product in products:
@@ -456,7 +484,7 @@ async def render_catalog(target) -> None:
             else:
                 title = f"{plain_stored_text(product['name'])} — {product['price']}"
             builder.button(text=title[:64], callback_data=f"product:{product['id']}")
-        builder.add(design_button("btn_back", tr(target.from_user.id, "back"), "home"))
+        builder.add(design_button("btn_back", tr(target.from_user.id, "back"), "catalog", "danger"))
         builder.adjust(1)
         text = f"🛒 <b>{tr(target.from_user.id, 'shop')}</b>\n\n{tr(target.from_user.id, 'choose_product')}"
         markup = builder.as_markup()
@@ -525,6 +553,15 @@ async def cb_catalog(event: Message | CallbackQuery):
     await render_catalog(target)
 
 
+@dp.callback_query(F.data == "catalog:plugins")
+async def cb_plugins(callback: CallbackQuery):
+    await callback.answer()
+    if not has_accepted_license(callback.from_user.id):
+        await show_license_gate(callback, callback.from_user.id)
+        return
+    await render_plugins(callback)
+
+
 @dp.callback_query(F.data.startswith("product:"))
 async def cb_product(callback: CallbackQuery):
     await callback.answer()
@@ -545,7 +582,7 @@ async def cb_product(callback: CallbackQuery):
     rows = [
         [InlineKeyboardButton(text=tr(callback.from_user.id, "buy", price=price_rub), callback_data=f"buybal:{product_id}")],
         [InlineKeyboardButton(text=tr(callback.from_user.id, "manual"), callback_data=f"buy:{product_id}")],
-        [InlineKeyboardButton(text=tr(callback.from_user.id, "back_catalog"), callback_data="catalog")],
+        [InlineKeyboardButton(text=tr(callback.from_user.id, "back_catalog"), callback_data="catalog:plugins")],
         [InlineKeyboardButton(text=tr(callback.from_user.id, "home"), callback_data="home")],
     ]
     keyboard = InlineKeyboardMarkup(inline_keyboard=rows)
@@ -984,8 +1021,8 @@ def documents_keyboard() -> InlineKeyboardMarkup:
         for title, url in DOCUMENTS
     ]
     rows.extend([
-        [support_button()],
-        [design_button("btn_back", "⬅️ Назад", "faq")],
+        [support_button(style=None)],
+        [design_button("btn_back", "⬅️ Назад", "faq", "danger")],
     ])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -1030,8 +1067,8 @@ async def cb_documents(callback: CallbackQuery):
         (("💵 Products and Pricing" if lang == "en" else ("💵 Товари й тарифи" if lang == "uk" else "💵 Товары и тарифы")), DOCUMENTS[2][1]),
     ]
     rows = [[InlineKeyboardButton(text=title, url=url)] for title, url in titles]
-    rows += [[support_button(lang)],
-             [design_button("btn_back", tr(callback.from_user.id, "back"), "faq")]]
+    rows += [[support_button(lang, style=None)],
+             [design_button("btn_back", tr(callback.from_user.id, "back"), "faq", "danger")]]
     await safe_edit_or_send(callback, tr(callback.from_user.id, "documents"), reply_markup=InlineKeyboardMarkup(inline_keyboard=rows), photo=banner_path("faq"))
 
 
