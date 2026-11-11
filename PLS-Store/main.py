@@ -618,6 +618,13 @@ async def render_plugins(target) -> None:
 dp = Dispatcher(storage=MemoryStorage())
 
 
+@dp.message(Command("testdocs"))
+async def cmd_testdocs(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    await show_license_gate(message, message.from_user.id)
+
+
 @dp.message(CommandStart())
 async def cmd_start(message: Message):
     ensure_user(message.from_user.id, message.from_user.username, message.from_user.first_name)
@@ -2004,6 +2011,7 @@ async def setup_bot_commands(bot: Bot):
             BotCommand(command="addpromo", description="Создать промокод"),
             BotCommand(command="reply", description="Ответить пользователю"),
             BotCommand(command="syncemojis", description="Обновить анимированные эмодзи"),
+            BotCommand(command="testdocs", description="Проверить экран документов"),
         ], scope=BotCommandScopeChat(chat_id=ADMIN_ID))
 
 

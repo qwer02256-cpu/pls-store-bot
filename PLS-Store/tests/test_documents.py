@@ -75,3 +75,21 @@ class FirstEntryTests(unittest.IsolatedAsyncioTestCase):
             message.text='https://example.org/privacy?lang=ru&version=1'
             await main.adm_design_save(message,state)
             save.assert_called_once_with('document_privacy_url',message.text)
+
+    async def test_admin_can_preview_after_acceptance_without_resetting_it(self):
+        with tempfile.TemporaryDirectory() as tmp,patch.object(db,'DB_PATH',Path(tmp)/'db'):
+            db.init_db();db.ensure_user(42);main.accept_license(42)
+            with db.db() as conn:
+                conn.execute("UPDATE license_accepts SET accepted_at='2020-01-01 00:00:00' WHERE user_id=42")
+            message=SimpleNamespace(from_user=SimpleNamespace(id=42))
+            with patch.object(main,'ADMIN_ID',42),patch.object(main,'safe_edit_or_send',AsyncMock()) as render:
+                await main.cmd_testdocs(message)
+            self.assertEqual(len(render.call_args.kwargs['reply_markup'].inline_keyboard),4)
+            self.assertTrue(main.has_accepted_license(42))
+            with db.db() as conn:
+                self.assertEqual(conn.execute('SELECT accepted_at FROM license_accepts WHERE user_id=42').fetchone()[0],'2020-01-01 00:00:00')
+
+    async def test_non_admin_cannot_use_preview_command(self):
+        with patch.object(main,'ADMIN_ID',42),patch.object(main,'show_license_gate',AsyncMock()) as show:
+            await main.cmd_testdocs(SimpleNamespace(from_user=SimpleNamespace(id=99)))
+            show.assert_not_awaited()
