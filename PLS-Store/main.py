@@ -1801,9 +1801,17 @@ async def platega_callback_handler(request: web.Request):
     bot: Bot = request.app["bot"]
     if not platega:
         return web.Response(status=503, text="Platega not configured")
+    # Platega checks URL reachability separately from transaction delivery.
+    # This branch only returns a health response: even a forged User-Agent
+    # cannot confirm/cancel a payment, because we never process its body.
+    if request.headers.get("User-Agent", "").startswith("Platega-CallbackUrlCheck/"):
+        log.info("Platega callback URL reachability check")
+        return web.Response(status=200, text="OK")
     headers = {k: v for k, v in request.headers.items()}
     if not platega.verify_callback_headers(headers):
-        log.warning("Platega callback: invalid headers")
+        names = {name.lower() for name in headers}
+        log.warning("Platega callback: invalid headers (merchant present=%s, secret present=%s)",
+                    "x-merchantid" in names, "x-secret" in names)
         return web.Response(status=403, text="Forbidden")
     try:
         data = await request.json()

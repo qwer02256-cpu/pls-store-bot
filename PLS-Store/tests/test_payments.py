@@ -88,6 +88,27 @@ class PaymentFlowTests(unittest.IsolatedAsyncioTestCase):
             finally:await client.aclose()
 
 
+class CallbackProbeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_url_probe_returns_ok_without_processing_payment_body(self):
+        request=SimpleNamespace(app={'bot':SimpleNamespace()},
+            headers={'User-Agent':'Platega-CallbackUrlCheck/1.0'},
+            json=AsyncMock(return_value={'status':'CONFIRMED','id':'forged','amount':100}))
+        with patch.object(main,'platega',SimpleNamespace()), patch.object(main,'process_confirmed_payment',AsyncMock()) as settle:
+            response=await main.platega_callback_handler(request)
+            self.assertEqual(response.status,200)
+            self.assertEqual(response.text,'OK')
+            request.json.assert_not_awaited()
+            settle.assert_not_awaited()
+
+    async def test_actual_callback_still_requires_credentials(self):
+        provider=SimpleNamespace(verify_callback_headers=lambda headers:False)
+        request=SimpleNamespace(app={'bot':SimpleNamespace()},headers={'User-Agent':'Platega-Callbacks'},json=AsyncMock())
+        with patch.object(main,'platega',provider), patch.object(main,'process_confirmed_payment',AsyncMock()) as settle:
+            self.assertEqual((await main.platega_callback_handler(request)).status,403)
+            request.json.assert_not_awaited()
+            settle.assert_not_awaited()
+
+
 class MonitorTests(unittest.IsolatedAsyncioTestCase):
     async def test_poll_and_callback_share_idempotent_ledger(self):
         from services.payment_monitor import reconcile_pending
