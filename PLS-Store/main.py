@@ -967,7 +967,7 @@ async def cb_pay_status(callback: CallbackQuery, bot: Bot):
     await callback.answer()
     tx_id = callback.data.split(":", 1)[1]
     with db() as conn:
-        owned = conn.execute("SELECT id FROM payments WHERE platega_id=? AND user_id=?",
+        owned = conn.execute("SELECT id, amount, currency FROM payments WHERE platega_id=? AND user_id=?",
                              (tx_id, callback.from_user.id)).fetchone()
     if not owned:
         await callback.message.answer("Платёж не найден.")
@@ -985,9 +985,24 @@ async def cb_pay_status(callback: CallbackQuery, bot: Bot):
     if status == "CONFIRMED":
         try:
             await process_confirmed_payment(tx_id, data, bot)
-        except ValueError:
-            log.warning("Payment status details mismatch")
-            await callback.message.answer("Не удалось подтвердить сумму платежа. Обратитесь в поддержку.")
+        except ValueError as exc:
+            details = data.get("paymentDetails")
+            details = details if isinstance(details, dict) else data
+            provider_id = data.get("transactionId") or data.get("id")
+            log.warning(
+                "Payment settlement rejected: %s; tx=%s; expected=%s %s; provider_id=%s; received=%s %s",
+                str(exc), tx_id, owned["amount"], owned["currency"], provider_id,
+                details.get("amount"), details.get("currency"),
+            )
+            await callback.message.answer("Оплата подтверждена Platega, но зачисление пока не выполнено. Повторно оплачивать счёт не нужно.")
+            if is_admin(callback.from_user.id):
+                diagnostic = (
+                    f"Причина: {exc}\n"
+                    f"Счёт: {owned['amount']} {owned['currency']}\n"
+                    f"Ответ Platega: {details.get('amount')} {details.get('currency')}\n"
+                    f"ID в ответе: {provider_id}"
+                )
+                await callback.message.answer(f"<pre>{html.escape(diagnostic)}</pre>")
 
 
 async def process_confirmed_payment(tx_id: str, data: dict, bot: Bot) -> bool:
@@ -1825,8 +1840,8 @@ async def platega_callback_handler(request: web.Request):
     if status == "CONFIRMED" and tx_id:
         try:
             await process_confirmed_payment(str(tx_id), data, bot)
-        except ValueError:
-            log.warning("Rejected payment callback: payment details mismatch")
+        except ValueError as exc:
+            log.warning("Rejected payment callback: %s", str(exc))
             return web.Response(status=400, text="Payment mismatch")
     elif status in ("CANCELED", "CANCELLED") and tx_id:
         with db() as conn:

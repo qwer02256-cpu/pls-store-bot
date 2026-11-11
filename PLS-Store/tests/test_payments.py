@@ -47,6 +47,10 @@ class LedgerTests(unittest.TestCase):
             with self.assertRaises(ValueError):settle_payment('tx',data)
         self.assertEqual(db.get_user(2)['balance'],0)
 
+    def test_iso_numeric_ruble_currency_settles_and_still_rejects_other_currencies(self):
+        payload={'status':'CONFIRMED','id':'tx','paymentDetails':{'amount':'100.25','currency':643}}
+        self.assertEqual(settle_payment('tx',payload)['balance'],100.25)
+
     def test_invalid_amounts_rejected(self):
         for value in [0,-1,'NaN','Infinity','-Infinity','1.001','bad','1e9999']:
             with self.assertRaises(ValueError):money(value)

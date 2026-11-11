@@ -27,6 +27,8 @@ async def reconcile_pending(client, on_confirmed, after_id=0, limit=50):
                 with db() as conn:
                     conn.execute("UPDATE payments SET status=? WHERE id=? AND status='PENDING'",
                                  ('CANCELED' if status == 'CANCELLED' else status, row['id']))
+        except ValueError as exc:
+            log.warning('Payment settlement rejected for local payment %s: %s', row['id'], str(exc))
         except Exception as exc:
             # Keep pending on network/database errors; the next sweep retries it.
             log.warning('Payment reconciliation failed for local payment %s: %s', row['id'], type(exc).__name__)

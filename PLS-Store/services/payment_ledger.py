@@ -20,6 +20,12 @@ def money(value) -> Decimal:
     return amount
 
 
+def currency_code(value) -> str:
+    # ISO 4217 numeric RUB and the historical RUR spelling identify the same currency.
+    code = str(value).strip().upper()
+    return 'RUB' if code in {'RUB', 'RUR', '643'} else code
+
+
 def settle_payment(tx_id: str, data: dict):
     """Return settlement details once; roll back balance, logs and status together."""
     if str(data.get('status', '')).upper() != 'CONFIRMED':
@@ -38,7 +44,7 @@ def settle_payment(tx_id: str, data: dict):
             raise ValueError('Invalid payment details')
         if 'amount' in details and money(details['amount']) != amount:
             raise ValueError('Payment amount mismatch')
-        if details.get('currency') and str(details['currency']).upper() != row['currency'].upper():
+        if details.get('currency') and currency_code(details['currency']) != currency_code(row['currency']):
             raise ValueError('Payment currency mismatch')
         user_id = row['user_id']
         user = conn.execute('SELECT * FROM users WHERE user_id=?', (user_id,)).fetchone()
