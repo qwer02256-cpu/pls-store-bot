@@ -22,6 +22,7 @@ PLATEGA_MERCHANT_ID = os.getenv("PLATEGA_MERCHANT_ID", "").strip()
 PLATEGA_SECRET = os.getenv("PLATEGA_SECRET", "").strip()
 PLATEGA_CALLBACK_BASE = os.getenv("PLATEGA_CALLBACK_BASE", "").strip().rstrip("/")
 PLATEGA_CALLBACK_PORT = int(os.getenv("PLATEGA_CALLBACK_PORT", "8080"))
+PLATEGA_POLL_INTERVAL = max(15, int(os.getenv("PLATEGA_POLL_INTERVAL", "30")))
 
 ASSETS_DIR = _BASE_DIR / "assets"
 BANNERS_DIR = ASSETS_DIR / "banners"

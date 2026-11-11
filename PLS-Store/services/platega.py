@@ -10,6 +10,7 @@ Callback: POST to your URL with same X-MerchantId / X-Secret headers, body statu
 from __future__ import annotations
 
 import logging
+import hmac
 from typing import Any, Optional
 
 import httpx
@@ -81,11 +82,16 @@ class PlategaClient:
 
         try:
             resp = await self._client.post(endpoint, json=body)
-            data = resp.json() if resp.content else {}
+            try:
+                data = resp.json() if resp.content else {}
+            except ValueError:
+                raise PlategaError("Platega returned an invalid response", status_code=resp.status_code) from None
+            if not isinstance(data, dict):
+                raise PlategaError("Platega returned an invalid response", status_code=resp.status_code)
             if resp.status_code >= 400:
-                log.error("Platega create error %s: %s", resp.status_code, data)
+                log.error("Platega create failed with HTTP %s", resp.status_code)
                 raise PlategaError(
-                    f"Platega error {resp.status_code}: {data}",
+                    f"Platega error {resp.status_code}",
                     status_code=resp.status_code,
                     payload=data,
                 )
@@ -97,10 +103,15 @@ class PlategaClient:
     async def get_status(self, transaction_id: str) -> dict[str, Any]:
         try:
             resp = await self._client.get(f"/transaction/{transaction_id}")
-            data = resp.json() if resp.content else {}
+            try:
+                data = resp.json() if resp.content else {}
+            except ValueError:
+                raise PlategaError("Platega returned an invalid response", status_code=resp.status_code) from None
+            if not isinstance(data, dict):
+                raise PlategaError("Platega returned an invalid response", status_code=resp.status_code)
             if resp.status_code >= 400:
                 raise PlategaError(
-                    f"Status error {resp.status_code}: {data}",
+                    f"Platega status error {resp.status_code}",
                     status_code=resp.status_code,
                     payload=data,
                 )
@@ -112,7 +123,7 @@ class PlategaClient:
         """Verify that callback comes from Platega (same X-MerchantId + X-Secret)."""
         mid = headers.get("X-MerchantId") or headers.get("x-merchantid") or ""
         sec = headers.get("X-Secret") or headers.get("x-secret") or ""
-        return mid == self.merchant_id and sec == self.secret
+        return hmac.compare_digest(str(mid).encode(), self.merchant_id.encode()) and hmac.compare_digest(str(sec).encode(), self.secret.encode())
 
 
 # Payment method codes from official docs

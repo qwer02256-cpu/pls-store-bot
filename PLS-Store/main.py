@@ -9,6 +9,7 @@ import html
 import logging
 import os
 import re
+from urllib.parse import urlsplit
 from pathlib import Path
 
 from aiohttp import web
@@ -44,6 +45,7 @@ from config import (
     PLATEGA_SECRET,
     PLATEGA_CALLBACK_BASE,
     PLATEGA_CALLBACK_PORT,
+    PLATEGA_POLL_INTERVAL,
     ASSETS_DIR,
     BANNERS_DIR,
     require_config,
@@ -66,6 +68,8 @@ from services.db import (
 )
 from services.platega import PlategaClient, PlategaError
 from services.emoji import PackEmojiMiddleware
+from services.payment_ledger import settle_payment, money
+from services.payment_monitor import monitor_payments
 from services.ui import (
     main_menu_kb,
     profile_kb,
@@ -155,7 +159,7 @@ I18N = {
         "topup_custom": "Введите сумму пополнения в рублях (минимум {minimum}₽):", "number": "Введите число, например 500",
         "minimum": "Минимальная сумма: {amount:.0f}₽", "payment_unavailable": "⚠️ Платёжная система пока не настроена.",
         "payment_error": "Ошибка создания платежа: {error}", "pay": "💳 Перейти к оплате", "check": "🔄 Проверить статус",
-        "to_profile": "⬅️ В профиль", "invoice": "💳 Счёт на <b>{amount:.0f}₽</b> создан.\nID: <code>{tx_id}</code>\n\nНажмите кнопку для оплаты. После успешной оплаты баланс пополнится автоматически.",
+        "to_profile": "⬅️ В профиль", "invoice": "💳 Счёт на <b>{amount:.2f}₽</b> создан.\nID: <code>{tx_id}</code>\n\nНажмите кнопку для оплаты. После успешной оплаты баланс пополнится автоматически.",
         "status": "Статус платежа <code>{tx_id}</code>: <b>{status}</b>", "faq_title": "❓ FAQ — частые вопросы",
         "faq": "🗓 <b>Как купить?</b>\nПрофиль → «Пополнить», затем Магазин → выберите товар → оплата с баланса.\n\n💲 <b>Чем платить?</b>\nСБП и доступные способы оплаты Platega. Баланс зачисляется автоматически.\n\n🚀 <b>Когда придёт товар?</b>\nПосле успешной оплаты с баланса товар появится в «Мои покупки».\n\n☑️ <b>Гарантия и замена?</b>\nПо вопросам замены и гарантии — в поддержку.\n\n🎧 <b>Поддержка</b>\nКнопка «Поддержка» в главном меню.",
         "documents": "<b>📄 Документы</b>\n━━━━━━━━━━━━━━━━━━━━\n\nПравила сервиса, обработка данных и актуальные цены.",
@@ -182,7 +186,7 @@ I18N = {
         "topup_custom": "Enter the top-up amount in RUB (minimum {minimum}₽):", "number": "Enter a number, e.g. 500",
         "minimum": "Minimum amount: {amount:.0f}₽", "payment_unavailable": "⚠️ The payment system is not configured yet.",
         "payment_error": "Payment creation error: {error}", "pay": "💳 Proceed to payment", "check": "🔄 Check status",
-        "to_profile": "⬅️ Profile", "invoice": "💳 Invoice for <b>{amount:.0f}₽</b> created.\nID: <code>{tx_id}</code>\n\nUse the button to pay. Your balance will be credited automatically after successful payment.",
+        "to_profile": "⬅️ Profile", "invoice": "💳 Invoice for <b>{amount:.2f}₽</b> created.\nID: <code>{tx_id}</code>\n\nUse the button to pay. Your balance will be credited automatically after successful payment.",
         "status": "Payment status <code>{tx_id}</code>: <b>{status}</b>", "faq_title": "❓ FAQ — frequently asked questions",
         "faq": "🗓 <b>How do I buy?</b>\nOpen Profile → Add balance, then Shop → choose a product → pay using your balance.\n\n💲 <b>How can I pay?</b>\nAvailable Platega payment methods. Your balance is credited automatically.\n\n🚀 <b>When will I receive the product?</b>\nAfter a successful balance payment, the product will appear in My purchases.\n\n☑️ <b>Warranty and replacement?</b>\nContact support for warranty and replacement questions.\n\n🎧 <b>Support</b>\nUse the Support button in the main menu.",
         "documents": "<b>📄 Documents</b>\n━━━━━━━━━━━━━━━━━━━━\n\nService rules, data processing information and current prices.",
@@ -230,7 +234,7 @@ I18N["uk"] = {'welcome': '<b>PLS Store</b>\n🏠 <b>Головне меню</b>\
  'pay': '💳 Перейти до оплати',
  'check': '🔄 Перевірити статус',
  'to_profile': '⬅️ До профілю',
- 'invoice': '💳 Рахунок на <b>{amount:.0f}₽</b> створено.\n'
+ 'invoice': '💳 Рахунок на <b>{amount:.2f}₽</b> створено.\n'
             'ID: <code>{tx_id}</code>\n'
             '\n'
             'Натисніть кнопку оплати. Після успішної оплати баланс поповниться автоматично.',
@@ -893,6 +897,15 @@ async def topup_custom_msg(message: Message, state: FSMContext, bot: Bot):
 
 
 async def create_topup(message: Message, user, amount: float, bot: Bot):
+    try:
+        amount = float(money(amount))
+        minimum = money(get_setting("min_topup", "100"))
+    except ValueError:
+        await message.answer(tr(user.id, "number"))
+        return
+    if amount < minimum:
+        await message.answer(tr(user.id, "minimum", amount=float(minimum)))
+        return
     ensure_user(user.id, user.username, user.first_name)
     if not platega:
         await message.answer(
@@ -922,11 +935,21 @@ async def create_topup(message: Message, user, amount: float, bot: Bot):
 
     tx_id = data.get("transactionId") or data.get("id")
     redirect = data.get("redirect") or data.get("url")
+    try:
+        parsed_url = urlsplit(redirect) if isinstance(redirect, str) else None
+        valid_url = parsed_url and parsed_url.scheme == "https" and parsed_url.hostname
+    except ValueError:
+        valid_url = False
+    if not tx_id or len(str(tx_id).encode()) > 54 or not valid_url:
+        log.error("Platega payment response has no valid transaction ID or payment URL")
+        await message.answer(tr(user.id, "payment_error", error="Некорректный ответ платёжной системы"))
+        return
+    tx_id = str(tx_id)
     with db() as conn:
         conn.execute(
             "INSERT INTO payments (user_id, amount, platega_id, status, payload, redirect_url) "
             "VALUES (?, ?, ?, ?, ?, ?)",
-            (user.id, amount, tx_id, data.get("status", "PENDING"), payload, redirect),
+            (user.id, amount, tx_id, "PENDING", payload, redirect),
         )
     rows = []
     if redirect:
@@ -943,6 +966,12 @@ async def create_topup(message: Message, user, amount: float, bot: Bot):
 async def cb_pay_status(callback: CallbackQuery, bot: Bot):
     await callback.answer()
     tx_id = callback.data.split(":", 1)[1]
+    with db() as conn:
+        owned = conn.execute("SELECT id FROM payments WHERE platega_id=? AND user_id=?",
+                             (tx_id, callback.from_user.id)).fetchone()
+    if not owned:
+        await callback.message.answer("Платёж не найден.")
+        return
     if not platega:
         await callback.message.answer(tr(callback.from_user.id, "payment_unavailable"))
         return
@@ -954,57 +983,33 @@ async def cb_pay_status(callback: CallbackQuery, bot: Bot):
     status = (data.get("status") or "").upper()
     await callback.message.answer(tr(callback.from_user.id, "status", tx_id=tx_id, status=status))
     if status == "CONFIRMED":
-        await process_confirmed_payment(tx_id, data, bot)
+        try:
+            await process_confirmed_payment(tx_id, data, bot)
+        except ValueError:
+            log.warning("Payment status details mismatch")
+            await callback.message.answer("Не удалось подтвердить сумму платежа. Обратитесь в поддержку.")
 
 
 async def process_confirmed_payment(tx_id: str, data: dict, bot: Bot) -> bool:
-    with db() as conn:
-        conn.execute("BEGIN IMMEDIATE")
-        row = conn.execute(
-            "SELECT * FROM payments WHERE platega_id=? AND status != 'CONFIRMED'",
-            (tx_id,),
-        ).fetchone()
-        if not row:
-            conn.rollback()
-            return False
-        amount = float(row["amount"])
-        user_id = row["user_id"]
-        pay_id = row["id"]
-        conn.execute(
-            "UPDATE payments SET status='CONFIRMED', confirmed_at=CURRENT_TIMESTAMP WHERE platega_id=?",
-            (tx_id,),
-        )
-        conn.commit()
-    try:
-        new_bal = change_balance(user_id, amount, f"Platega topup {tx_id}", payment_id=pay_id)
-    except Exception:
-        log.exception("balance credit failed")
+    result = settle_payment(tx_id, data)
+    if result is None:
         return False
+    user_id = result["user_id"]
+    amount = result["amount"]
+    new_bal = result["balance"]
     try:
         await bot.send_message(
             user_id,
-            (f"✅ Balance topped up by <b>{amount:.0f}₽</b>.\nCurrent balance: <b>{new_bal:.0f}₽</b>" if get_user_language(user_id) == "en" else f"✅ Баланс пополнен на <b>{amount:.0f}₽</b>.\nТекущий баланс: <b>{new_bal:.0f}₽</b>"),
+            (f"✅ Balance topped up by <b>{amount:.2f}₽</b>.\nCurrent balance: <b>{new_bal:.2f}₽</b>" if get_user_language(user_id) == "en" else f"✅ Баланс пополнен на <b>{amount:.2f}₽</b>.\nТекущий баланс: <b>{new_bal:.2f}₽</b>"),
         )
     except Exception:
-        pass
-    u = ensure_user(user_id)
-    if u.get("referrer_id"):
-        pct = float(get_setting("referral_percent", "10")) / 100.0
-        bonus = round(amount * pct, 2)
-        if bonus > 0:
-            change_balance(u["referrer_id"], bonus, f"Реферал {user_id} topup")
-            with db() as conn:
-                conn.execute(
-                    "UPDATE users SET referral_earnings = referral_earnings + ? WHERE user_id=?",
-                    (bonus, u["referrer_id"]),
-                )
-            try:
-                await bot.send_message(
-                    u["referrer_id"],
-                    f"🎁 Реферальный бонус +{bonus:.0f}₽ (пополнение пользователя {user_id})",
-                )
-            except Exception:
-                pass
+        log.warning("Top-up credited but user notification failed")
+    if result["referral_bonus"] > 0:
+        try:
+            await bot.send_message(result["referrer_id"],
+                f"🎁 Реферальный бонус +{result['referral_bonus']:.2f}₽ (пополнение пользователя {user_id})")
+        except Exception:
+            log.warning("Referral credited but notification failed")
     return True
 
 
@@ -1804,11 +1809,17 @@ async def platega_callback_handler(request: web.Request):
         data = await request.json()
     except Exception:
         return web.Response(status=400, text="Bad JSON")
+    if not isinstance(data, dict) or not isinstance(data.get("status", ""), str):
+        return web.Response(status=400, text="Invalid payload")
     status = (data.get("status") or "").upper()
     tx_id = data.get("id") or data.get("transactionId")
     log.info("Platega callback: %s status=%s", tx_id, status)
     if status == "CONFIRMED" and tx_id:
-        await process_confirmed_payment(str(tx_id), data, bot)
+        try:
+            await process_confirmed_payment(str(tx_id), data, bot)
+        except ValueError:
+            log.warning("Rejected payment callback: payment details mismatch")
+            return web.Response(status=400, text="Payment mismatch")
     elif status in ("CANCELED", "CANCELLED") and tx_id:
         with db() as conn:
             conn.execute(
@@ -1818,6 +1829,10 @@ async def platega_callback_handler(request: web.Request):
     return web.Response(status=200, text="OK")
 
 
+async def payment_health_handler(request: web.Request):
+    return web.Response(status=200 if platega else 503, text="OK" if platega else "Payments not configured")
+
+
 async def start_callback_server(bot: Bot):
     if not PLATEGA_CALLBACK_BASE:
         log.warning("PLATEGA_CALLBACK_BASE not set — callback server disabled")
@@ -1825,7 +1840,7 @@ async def start_callback_server(bot: Bot):
     app = web.Application()
     app["bot"] = bot
     app.router.add_post("/platega/callback", platega_callback_handler)
-    app.router.add_get("/platega/callback", platega_callback_handler)  # health
+    app.router.add_get("/platega/callback", payment_health_handler)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", PLATEGA_CALLBACK_PORT)
@@ -1871,10 +1886,21 @@ async def main():
     except Exception:
         log.exception("commands setup failed")
     runner = await start_callback_server(bot)
+    payment_task = None
+    if platega:
+        async def on_confirmed(tx_id, data):
+            return await process_confirmed_payment(tx_id, data, bot)
+        payment_task = asyncio.create_task(
+            monitor_payments(platega, on_confirmed, interval=PLATEGA_POLL_INTERVAL),
+            name="platega-payment-monitor",
+        )
     log.info("PLS Store starting…")
     try:
         await dp.start_polling(bot)
     finally:
+        if payment_task:
+            payment_task.cancel()
+            await asyncio.gather(payment_task, return_exceptions=True)
         if runner:
             await runner.cleanup()
         if platega:
