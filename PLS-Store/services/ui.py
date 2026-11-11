@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import html
+import re
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -9,40 +10,61 @@ from services.db import get_setting, ensure_user, get_user
 
 
 def btn(key: str, default: str) -> str:
-    return get_setting(key, default)
+    """Return button text without HTML custom-emoji wrappers."""
+    value = get_setting(key, default)
+    # The custom emoji is rendered separately by icon_custom_emoji_id.
+    # Remove its fallback character from the label to avoid showing it twice.
+    clean = re.sub(r'<tg-emoji\s+emoji-id="\d+">.*?</tg-emoji>', '', value, flags=re.DOTALL).strip()
+    return clean or default
+
+
+def design_button(key: str, default: str, callback_data: str, style: str | None = None) -> InlineKeyboardButton:
+    """Build a configured button with optional Premium Emoji icon and Bot API style."""
+    emoji_id = get_setting(f"{key}_icon_custom_emoji_id", "").strip()
+    kwargs = {"text": btn(key, default), "callback_data": callback_data}
+    if emoji_id.isdigit():
+        kwargs["icon_custom_emoji_id"] = emoji_id
+    if style in {"primary", "success", "danger"}:
+        kwargs["style"] = style
+    return InlineKeyboardButton(**kwargs)
 
 
 def main_menu_kb() -> InlineKeyboardMarkup:
+    # Layout and colors match the supplied reference: blue/green pairs,
+    # followed by a full-width red support button.
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text=btn("btn_profile", "👤 Профиль"), callback_data="profile"),
-            InlineKeyboardButton(text=btn("btn_shop", "🛒 Магазин"), callback_data="catalog"),
+            design_button("btn_profile", "👤 Профиль", "profile", "primary"),
+            design_button("btn_shop", "🛒 Магазин", "catalog", "success"),
         ],
         [
-            InlineKeyboardButton(text=btn("btn_faq", "❓ FAQ"), callback_data="faq"),
-            InlineKeyboardButton(text=btn("btn_support", "🎧 Поддержка"), callback_data="support"),
+            design_button("btn_language", "🌐 Язык", "language", "primary"),
+            design_button("btn_faq", "❓ FAQ", "faq", "success"),
+        ],
+        [
+            design_button("btn_support", "🎧 Поддержка", "support", "danger"),
         ],
     ])
 
 
 def profile_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=btn("btn_topup", "💳 Пополнить баланс"), callback_data="topup")],
+        [design_button("btn_topup", "💳 Пополнить баланс", "topup")],
         [
-            InlineKeyboardButton(text=btn("btn_purchases", "🛒 Мои покупки"), callback_data="mypurchases"),
-            InlineKeyboardButton(text=btn("btn_api", "⚡ API"), callback_data="api_info"),
+            design_button("btn_purchases", "🛒 Мои покупки", "mypurchases"),
+            design_button("btn_api", "⚡ API", "api_info"),
         ],
         [
-            InlineKeyboardButton(text=btn("btn_promo", "🎟 Промокод"), callback_data="promo"),
-            InlineKeyboardButton(text=btn("btn_referral", "🔗 Рефералка"), callback_data="referral"),
+            design_button("btn_promo", "🎟 Промокод", "promo"),
+            design_button("btn_referral", "🔗 Рефералка", "referral"),
         ],
-        [InlineKeyboardButton(text=btn("btn_back", "⬅️ Назад"), callback_data="home")],
+        [design_button("btn_back", "⬅️ Назад", "home")],
     ])
 
 
 def back_kb(to: str = "home") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=btn("btn_back", "⬅️ Назад"), callback_data=to)]
+        [design_button("btn_back", "⬅️ Назад", to)]
     ])
 
 
@@ -73,5 +95,5 @@ def topup_amounts_kb() -> InlineKeyboardMarkup:
     if row:
         rows.append(row)
     rows.append([InlineKeyboardButton(text="✏️ Своя сумма", callback_data="topup:custom")])
-    rows.append([InlineKeyboardButton(text=btn("btn_back", "⬅️ Назад"), callback_data="profile")])
+    rows.append([design_button("btn_back", "⬅️ Назад", "profile")])
     return InlineKeyboardMarkup(inline_keyboard=rows)

@@ -168,6 +168,7 @@ def init_db() -> None:
             "welcome_text": "<b>PLS Store</b>\nПлагины и дополнения для FunPayCardinal\n\nДобро пожаловать, {first_name}!",
             "btn_profile": "👤 Профиль",
             "btn_shop": "🛒 Магазин",
+            "btn_language": "🌐 Язык",
             "btn_faq": "❓ FAQ",
             "btn_support": "🎧 Поддержка",
             "btn_topup": "💳 Пополнить баланс",

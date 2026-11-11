@@ -66,6 +66,7 @@ from services.ui import (
     topup_amounts_kb,
     profile_text,
     btn,
+    design_button,
 )
 
 # ─── logging ────────────────────────────────────────────────────────────────
@@ -323,7 +324,7 @@ async def render_catalog(target) -> None:
             else:
                 title = f"{plain_stored_text(product['name'])} — {product['price']}"
             builder.button(text=title[:64], callback_data=f"product:{product['id']}")
-        builder.button(text=btn("btn_back", "⬅️ Назад"), callback_data="home")
+        builder.add(design_button("btn_back", "⬅️ Назад", "home"))
         builder.adjust(1)
         text = f"🛒 <b>{btn('shop_title', 'Магазин PLS Store')}</b>\n\nВыбери интересующий товар:"
         markup = builder.as_markup()
@@ -880,9 +881,14 @@ def documents_keyboard() -> InlineKeyboardMarkup:
     ]
     rows.extend([
         [InlineKeyboardButton(text="🎧 Поддержка", callback_data="support")],
-        [InlineKeyboardButton(text=btn("btn_back", "⬅️ Назад"), callback_data="faq")],
+        [design_button("btn_back", "⬅️ Назад", "faq")],
     ])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+@dp.callback_query(F.data == "language")
+async def cb_language(callback: CallbackQuery):
+    await callback.answer("Пока доступен только русский язык.", show_alert=True)
 
 
 @dp.callback_query(F.data == "faq")
@@ -903,7 +909,7 @@ async def cb_faq(callback: CallbackQuery):
     )
     markup = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📄 Документы", callback_data="documents")],
-        [InlineKeyboardButton(text=btn("btn_back", "⬅️ Назад"), callback_data="home")],
+        [design_button("btn_back", "⬅️ Назад", "home")],
     ])
     await safe_edit_or_send(callback, text, reply_markup=markup, photo=banner_path("faq"))
 
@@ -1014,6 +1020,7 @@ DESIGN_KEYS = [
     ("welcome_text", "Приветствие ({first_name})"),
     ("btn_profile", "Кнопка Профиль"),
     ("btn_shop", "Кнопка Магазин"),
+    ("btn_language", "Кнопка Язык"),
     ("btn_faq", "Кнопка FAQ"),
     ("btn_support", "Кнопка Поддержка"),
     ("btn_topup", "Кнопка Пополнить"),
@@ -1060,8 +1067,9 @@ async def adm_design_edit(callback: CallbackQuery, state: FSMContext):
     current = get_setting(key, "")
     await callback.answer()
     await callback.message.answer(
-        f"Текущее значение <code>{key}</code>:\n\n{html.escape(current)}\n\n"
-        "Отправьте текст сообщением с Premium Emoji (или /cancel). Эмодзи сохранятся в тексте."
+        (f"Текущее значение <code>{key}</code>:\n\n{html.escape(current)}\n\n"
+         "Отправьте текст сообщением. Для кнопок можно добавить Premium Emoji: "
+         "он будет отображаться отдельной иконкой слева от названия (или /cancel).")
     )
 
 
@@ -1074,7 +1082,16 @@ async def adm_design_save(message: Message, state: FSMContext):
     if not key:
         await state.clear()
         return
-    set_setting(key, message_text_with_custom_emoji(message))
+    stored_value = message_text_with_custom_emoji(message)
+    set_setting(key, stored_value)
+    if key.startswith("btn_"):
+        # Telegram button icons use a separate Bot API field, not a <tg-emoji> HTML tag.
+        custom_emoji_id = next(
+            (str(entity.custom_emoji_id) for entity in (message.entities or [])
+             if entity.type == "custom_emoji" and entity.custom_emoji_id),
+            "",
+        )
+        set_setting(f"{key}_icon_custom_emoji_id", custom_emoji_id)
     await state.clear()
     await message.answer(
         f"✅ Сохранено: <code>{key}</code>",
