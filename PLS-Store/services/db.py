@@ -107,6 +107,13 @@ def init_db() -> None:
                 confirmed_at TEXT
             )
         """)
+        payment_cols = {r[1] for r in conn.execute("PRAGMA table_info(payments)")}
+        for column, declaration in {
+            "purpose": "TEXT NOT NULL DEFAULT 'topup'",
+            "product_id": "INTEGER", "product_name": "TEXT", "purchase_id": "INTEGER",
+        }.items():
+            if column not in payment_cols:
+                conn.execute(f"ALTER TABLE payments ADD COLUMN {column} {declaration}")
         try:
             conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_platega ON payments(platega_id)")
         except Exception:

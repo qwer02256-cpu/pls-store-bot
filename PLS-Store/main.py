@@ -163,7 +163,7 @@ I18N = {
         "payment_error": "Ошибка создания платежа: {error}", "pay": "💳 Перейти к оплате", "check": "🔄 Проверить статус",
         "to_profile": "⬅️ В профиль", "invoice": "💳 Счёт на <b>{amount:.2f}₽</b> создан.\nID: <code>{tx_id}</code>\n\nНажмите кнопку для оплаты. После успешной оплаты баланс пополнится автоматически.",
         "status": "Статус платежа <code>{tx_id}</code>: <b>{status}</b>", "faq_title": "❓ FAQ — частые вопросы",
-        "faq": "🗓 <b>Как купить?</b>\nПрофиль → «Пополнить», затем Магазин → выберите товар → оплата с баланса.\n\n💲 <b>Чем платить?</b>\nСБП и доступные способы оплаты Platega. Баланс зачисляется автоматически.\n\n🚀 <b>Когда придёт товар?</b>\nПосле успешной оплаты с баланса товар появится в «Мои покупки».\n\n☑️ <b>Гарантия и замена?</b>\nПо вопросам замены и гарантии — в поддержку.\n\n🎧 <b>Поддержка</b>\nКнопка «Поддержка» в главном меню.",
+        "faq": "🗓 <b>Как купить?</b>\nМагазин → Плагины для FunPayCardinal → выберите товар → «Купить» → способ оплаты.\n\n💲 <b>Чем платить?</b>\nСБП и доступные способы оплаты Platega. Баланс зачисляется автоматически.\n\n🚀 <b>Когда придёт товар?</b>\nПосле успешной оплаты покупка появится в «Мои покупки».\n\n☑️ <b>Гарантия и замена?</b>\nПо вопросам замены и гарантии — в поддержку.\n\n🎧 <b>Поддержка</b>\nКнопка «Поддержка» в главном меню.",
         "documents": "<b>📄 Документы</b>\n━━━━━━━━━━━━━━━━━━━━\n\nПравила сервиса, обработка данных и актуальные цены.",
         "support": "💬 <b>Поддержка PLS Store</b>\n\nНажми кнопку ниже, чтобы написать продавцу.",
         "support_unset": "💬 Поддержка пока не настроена.", "write_support": "💬 Написать в поддержку",
@@ -190,7 +190,7 @@ I18N = {
         "payment_error": "Payment creation error: {error}", "pay": "💳 Proceed to payment", "check": "🔄 Check status",
         "to_profile": "⬅️ Profile", "invoice": "💳 Invoice for <b>{amount:.2f}₽</b> created.\nID: <code>{tx_id}</code>\n\nUse the button to pay. Your balance will be credited automatically after successful payment.",
         "status": "Payment status <code>{tx_id}</code>: <b>{status}</b>", "faq_title": "❓ FAQ — frequently asked questions",
-        "faq": "🗓 <b>How do I buy?</b>\nOpen Profile → Add balance, then Shop → choose a product → pay using your balance.\n\n💲 <b>How can I pay?</b>\nAvailable Platega payment methods. Your balance is credited automatically.\n\n🚀 <b>When will I receive the product?</b>\nAfter a successful balance payment, the product will appear in My purchases.\n\n☑️ <b>Warranty and replacement?</b>\nContact support for warranty and replacement questions.\n\n🎧 <b>Support</b>\nUse the Support button in the main menu.",
+        "faq": "🗓 <b>How do I buy?</b>\nShop → Plugins for FunPayCardinal → choose a product → Buy → choose a payment method.\n\n💲 <b>How can I pay?</b>\nAvailable Platega payment methods. Your balance is credited automatically.\n\n🚀 <b>When will I receive the product?</b>\nAfter a successful payment, the purchase will appear in My purchases.\n\n☑️ <b>Warranty and replacement?</b>\nContact support for warranty and replacement questions.\n\n🎧 <b>Support</b>\nUse the Support button in the main menu.",
         "documents": "<b>📄 Documents</b>\n━━━━━━━━━━━━━━━━━━━━\n\nService rules, data processing information and current prices.",
         "support": "💬 <b>PLS Store Support</b>\n\nPress the button below to contact the seller.",
         "support_unset": "💬 Support has not been configured yet.", "write_support": "💬 Contact support",
@@ -243,13 +243,13 @@ I18N["uk"] = {'welcome': '<b>PLS Store</b>\n🏠 <b>Головне меню</b>\
  'status': 'Статус платежу <code>{tx_id}</code>: <b>{status}</b>',
  'faq_title': '❓ FAQ — часті запитання',
  'faq': '🗓 <b>Як купити?</b>\n'
-        'Профіль → «Поповнити», потім Магазин → виберіть товар → оплата з балансу.\n'
+        'Магазин → Плагіни для FunPayCardinal → виберіть товар → «Купити» → спосіб оплати.\n'
         '\n'
         '💲 <b>Як платити?</b>\n'
         'СБП та доступні способи оплати Platega. Баланс зараховується автоматично.\n'
         '\n'
         '🚀 <b>Коли надійде товар?</b>\n'
-        'Після успішної оплати з балансу товар з’явиться в «Мої покупки».\n'
+        'Після успішної оплати покупка з’явиться в «Мої покупки».\n'
         '\n'
         '☑️ <b>Гарантія та заміна?</b>\n'
         'З питань заміни та гарантії звертайтеся до підтримки.\n'
@@ -306,6 +306,74 @@ for _lang, _texts in {'ru': {'topup_choose': 'Выберите сумму или
                                   'Added to your balance: <b>{amount:.2f}₽</b>\n'
                                   'The final total including the fee is shown on the Platega payment page.',
         'payment_method_invalid': 'Choose an available payment method: SBP or cryptocurrency.'}}.items():
+    I18N[_lang].update(_texts)
+
+for _lang, _texts in {'ru': {'plugins_title': '🧩 Плагины для FunPayCardinal',
+        'purchase_method_choose': '💳 <b>Выберите способ оплаты</b>\n'
+                                  '\n'
+                                  'Товар: <b>{product}</b>\n'
+                                  'Цена: <b>{amount:.2f}₽</b>\n'
+                                  'Комиссию оплачивает покупатель сверх цены товара.',
+        'purchase_invoice': '🧾 <b>Оплата плагина</b>\n'
+                            '\n'
+                            'Товар: <b>{product}</b>\n'
+                            'Цена: <b>{amount:.2f}₽</b>\n'
+                            'ID: <code>{tx_id}</code>\n'
+                            '\n'
+                            'После подтверждения оплаты покупка появится в «Мои покупки».',
+        'purchase_fee_details': 'Способ: <b>{method}</b>\n'
+                                'Комиссия покупателя: <b>{fee}%</b>\n'
+                                'Итог к оплате указан на странице Platega.',
+        'purchase_paid': '✅ <b>Покупка оплачена!</b>\n'
+                         '\n'
+                         'Товар: <b>{product}</b>\n'
+                         'Оплачено за товар: <b>{amount:.2f}₽</b>\n'
+                         '\n'
+                         'Покупка сохранена в «Мои покупки». Продавцу отправлено уведомление.'},
+ 'uk': {'plugins_title': '🧩 Плагіни для FunPayCardinal',
+        'purchase_method_choose': '💳 <b>Виберіть спосіб оплати</b>\n'
+                                  '\n'
+                                  'Товар: <b>{product}</b>\n'
+                                  'Ціна: <b>{amount:.2f}₽</b>\n'
+                                  'Комісію сплачує покупець понад ціну товару.',
+        'purchase_invoice': '🧾 <b>Оплата плагіна</b>\n'
+                            '\n'
+                            'Товар: <b>{product}</b>\n'
+                            'Ціна: <b>{amount:.2f}₽</b>\n'
+                            'ID: <code>{tx_id}</code>\n'
+                            '\n'
+                            'Після підтвердження оплати покупка з’явиться в «Мої покупки».',
+        'purchase_fee_details': 'Спосіб: <b>{method}</b>\n'
+                                'Комісія покупця: <b>{fee}%</b>\n'
+                                'Підсумок до оплати вказано на сторінці Platega.',
+        'purchase_paid': '✅ <b>Покупку оплачено!</b>\n'
+                         '\n'
+                         'Товар: <b>{product}</b>\n'
+                         'Сплачено за товар: <b>{amount:.2f}₽</b>\n'
+                         '\n'
+                         'Покупку збережено в «Мої покупки». Продавцю надіслано сповіщення.'},
+ 'en': {'plugins_title': '🧩 Plugins for FunPayCardinal',
+        'purchase_method_choose': '💳 <b>Choose a payment method</b>\n'
+                                  '\n'
+                                  'Product: <b>{product}</b>\n'
+                                  'Price: <b>{amount:.2f}₽</b>\n'
+                                  'The buyer pays the fee on top of the product price.',
+        'purchase_invoice': '🧾 <b>Plugin payment</b>\n'
+                            '\n'
+                            'Product: <b>{product}</b>\n'
+                            'Price: <b>{amount:.2f}₽</b>\n'
+                            'ID: <code>{tx_id}</code>\n'
+                            '\n'
+                            'The purchase will appear in My purchases after payment confirmation.',
+        'purchase_fee_details': 'Method: <b>{method}</b>\n'
+                                'Buyer-paid fee: <b>{fee}%</b>\n'
+                                'The final payment total is shown on the Platega page.',
+        'purchase_paid': '✅ <b>Purchase paid!</b>\n'
+                         '\n'
+                         'Product: <b>{product}</b>\n'
+                         'Product price paid: <b>{amount:.2f}₽</b>\n'
+                         '\n'
+                         'Recorded in My purchases. A notification has been sent to the seller.'}}.items():
     I18N[_lang].update(_texts)
 
 def tr(user_id: int, key: str, **kwargs) -> str:
@@ -369,7 +437,7 @@ def banner_path(key: str) -> Path | None:
         if p.is_file():
             return p
     # Uploaded banners take precedence over bundled section defaults.
-    if key in {"profile", "faq", "language", "shop"}:
+    if key in {"profile", "faq", "language", "shop", "plugins"}:
         bundled = ASSETS_DIR / f"{key}.png"
         if bundled.is_file():
             return bundled
@@ -520,7 +588,7 @@ async def render_catalog(target) -> None:
 async def render_plugins(target) -> None:
     products = get_products()
     if not products:
-        text = f"🛒 <b>{tr(target.from_user.id, 'shop')}</b>\n\n{tr(target.from_user.id, 'no_products')}"
+        text = f"<b>{tr(target.from_user.id, 'plugins_title')}</b>\n\n{tr(target.from_user.id, 'no_products')}"
         markup = InlineKeyboardMarkup(inline_keyboard=[[design_button("btn_back", tr(target.from_user.id, "back"), "catalog", "danger")]])
     else:
         builder = InlineKeyboardBuilder()
@@ -534,10 +602,10 @@ async def render_plugins(target) -> None:
             builder.button(text=title[:64], callback_data=f"product:{product['id']}")
         builder.add(design_button("btn_back", tr(target.from_user.id, "back"), "catalog", "danger"))
         builder.adjust(1)
-        text = f"🛒 <b>{tr(target.from_user.id, 'shop')}</b>\n\n{tr(target.from_user.id, 'choose_product')}"
+        text = f"<b>{tr(target.from_user.id, 'plugins_title')}</b>\n\n{tr(target.from_user.id, 'choose_product')}"
         markup = builder.as_markup()
 
-    photo = banner_path("shop")
+    photo = banner_path("plugins")
     await safe_edit_or_send(target, text, reply_markup=markup, photo=photo)
 
 
@@ -628,8 +696,7 @@ async def cb_product(callback: CallbackQuery):
     text = build_product_caption(product, lang=get_user_language(callback.from_user.id))
     price_rub = parse_price_rub(product["price"], product)
     rows = [
-        [InlineKeyboardButton(text=tr(callback.from_user.id, "buy", price=price_rub), callback_data=f"buybal:{product_id}")],
-        [InlineKeyboardButton(text=tr(callback.from_user.id, "manual"), callback_data=f"buy:{product_id}")],
+        [InlineKeyboardButton(text=tr(callback.from_user.id, "buy", price=price_rub), callback_data=f"buyproduct:{product_id}")],
         [InlineKeyboardButton(text=tr(callback.from_user.id, "back_catalog"), callback_data="catalog:plugins")],
         [InlineKeyboardButton(text=tr(callback.from_user.id, "home"), callback_data="home")],
     ]
@@ -645,131 +712,56 @@ async def cb_product(callback: CallbackQuery):
     await safe_edit_or_send(callback, text, reply_markup=keyboard, photo=photo)
 
 
-# ─── buy from balance ───────────────────────────────────────────────────────
+# ─── direct product checkout ───────────────────────────────────────────────
+@dp.callback_query(F.data.startswith("buyproduct:"))
 @dp.callback_query(F.data.startswith("buybal:"))
-async def cb_buy_balance(callback: CallbackQuery, bot: Bot):
-    await callback.answer()
-    try:
-        product_id = int(callback.data.split(":")[1])
-    except (IndexError, ValueError):
-        return
-    product = get_product(product_id)
-    if not product or not product.get("active", 1):
-        await callback.message.answer(tr(callback.from_user.id, "unavailable"))
-        return
-    user_id = callback.from_user.id
-    ensure_user(user_id, callback.from_user.username, callback.from_user.first_name)
-    price = parse_price_rub(product["price"], product)
-    if price <= 0:
-        await callback.message.answer("Product price is not set. Contact support." if get_user_language(callback.from_user.id) == "en" else "Цена товара не задана. Обратитесь в поддержку.")
-        return
-    u = get_user(user_id)
-    bal = float(u["balance"]) if u else 0.0
-    if bal < price:
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text=("💳 Add balance" if get_user_language(user_id) == "en" else "💳 Пополнить баланс"), callback_data="topup")],
-            [InlineKeyboardButton(text=tr(user_id, "back"), callback_data=f"product:{product_id}")],
-        ])
-        await callback.message.answer(
-            ((f"Insufficient funds.\n\nPrice: <b>{price:.0f}₽</b>\nYour balance: <b>{bal:.0f}₽</b>\n\nAdd funds and try again.") if get_user_language(user_id) == "en" else (f"Недостаточно средств.\n\nЦена: <b>{price:.0f}₽</b>\nВаш баланс: <b>{bal:.0f}₽</b>\n\nПополните баланс и повторите покупку.")),
-            reply_markup=kb,
-        )
-        return
-
-    # confirm
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=(f"✅ Confirm charge {price:.0f}₽" if get_user_language(user_id) == "en" else f"✅ Подтвердить списание {price:.0f}₽"), callback_data=f"buyok:{product_id}")],
-        [InlineKeyboardButton(text=("❌ Cancel" if get_user_language(user_id) == "en" else "❌ Отмена"), callback_data=f"product:{product_id}")],
-    ])
-    await callback.message.answer(
-        ((f"Confirm purchase:\n\n📦 <b>{safe_stored_html(product['name'])}</b>\n💰 {price:.0f}₽\nBalance after purchase: <b>{bal - price:.0f}₽</b>") if get_user_language(user_id) == "en" else (f"Подтвердите покупку:\n\n📦 <b>{safe_stored_html(product['name'])}</b>\n💰 {price:.0f}₽\nБаланс после покупки: <b>{bal - price:.0f}₽</b>")),
-        reply_markup=kb,
-    )
-
-
 @dp.callback_query(F.data.startswith("buyok:"))
-async def cb_buy_confirm(callback: CallbackQuery, bot: Bot):
-    await callback.answer()
-    try:
-        product_id = int(callback.data.split(":")[1])
-    except (IndexError, ValueError):
-        return
-    product = get_product(product_id)
-    if not product:
-        await callback.message.answer(tr(callback.from_user.id, "unavailable"))
-        return
-    user_id = callback.from_user.id
-    price = parse_price_rub(product["price"], product)
-    try:
-        new_bal = change_balance(user_id, -price, f"Покупка: {product['name']}")
-    except ValueError:
-        await callback.message.answer("Insufficient funds. Add balance and try again." if get_user_language(user_id) == "en" else "Недостаточно средств. Пополните баланс.")
-        return
-    purchase_id = add_purchase(user_id, product_id, price, product["name"])
-    # also create order record for admin visibility
-    with db() as conn:
-        conn.execute(
-            "INSERT INTO orders (user_id, username, product_id, status) VALUES (?, ?, ?, 'completed')",
-            (user_id, callback.from_user.username, product_id),
-        )
-    await callback.message.answer(
-        ((f"✅ <b>Purchase successful!</b>\n\nProduct: <b>{safe_stored_html(product['name'])}</b>\nCharged: {price:.0f}₽\nBalance: <b>{new_bal:.0f}₽</b>\n\nYour product is available in My purchases.\nThe seller has been notified and will contact you if needed.") if get_user_language(user_id) == "en" else (f"✅ <b>Покупка успешна!</b>\n\nТовар: <b>{safe_stored_html(product['name'])}</b>\nСписано: {price:.0f}₽\nБаланс: <b>{new_bal:.0f}₽</b>\n\nТовар доступен в разделе «Мои покупки».\nПродавец получил уведомление и свяжется при необходимости.")),
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text=("🛒 My purchases" if get_user_language(user_id) == "en" else "🛒 Мои покупки"), callback_data="mypurchases")],
-            [InlineKeyboardButton(text=tr(callback.from_user.id, "home"), callback_data="home")],
-        ]),
-    )
-    try:
-        await bot.send_message(
-            ADMIN_ID,
-            f"✅ <b>Автопокупка #{purchase_id}</b>\n\n"
-            f"Товар: {safe_stored_html(product['name'])}\n"
-            f"Цена: {price:.0f}₽\n"
-            f"Покупатель: {html.escape(callback.from_user.full_name)}\n"
-            f"ID: <code>{user_id}</code>",
-        )
-    except Exception:
-        log.exception("admin notify failed")
-
-
-# ─── manual order (preserved) ───────────────────────────────────────────────
 @dp.callback_query(F.data.startswith("buy:"))
-async def cb_buy(callback: CallbackQuery, bot: Bot):
+async def cb_buy_balance(callback: CallbackQuery, bot: Bot):
+    # Old purchase/manual buttons also lead to the current checkout.
     await callback.answer()
     try:
         product_id = int(callback.data.split(":", 1)[1])
     except (ValueError, IndexError):
         return
     product = get_product(product_id)
-    if not product:
-        await safe_edit_or_send(callback, "Товар недоступен.", reply_markup=back_kb("catalog"))
+    if not product or not product.get("active", 1):
+        await callback.message.answer(tr(callback.from_user.id, "unavailable"))
         return
     user = callback.from_user
-    with db() as conn:
-        cursor = conn.execute(
-            "INSERT INTO orders (user_id, username, product_id) VALUES (?, ?, ?)",
-            (user.id, user.username, product_id),
-        )
-        order_id = cursor.lastrowid
-    await safe_edit_or_send(
-        callback,
-        ("✅ <b>Request sent!</b>\n\nThe seller has been notified and will contact you to arrange the purchase.\nPayment and delivery will be arranged manually." if get_user_language(user.id) == "en" else "✅ <b>Заявка отправлена!</b>\n\nПродавец получил уведомление и свяжется с тобой для оформления покупки.\nОплата и передача товара согласовываются вручную."),
-        reply_markup=back_kb("home", get_user_language(user.id)),
-    )
-    username = f"@{user.username}" if user.username else "без username"
+    ensure_user(user.id, user.username, user.first_name)
     try:
-        await bot.send_message(
-            ADMIN_ID,
-            f"🔔 <b>Новая заявка №{order_id}</b>\n\n"
-            f"Товар: <b>{safe_stored_html(product['name'])}</b>\n"
-            f"Цена: {html.escape(product['price'])}\n"
-            f"Покупатель: {html.escape(user.full_name)}\n"
-            f"Username: {html.escape(username)}\n"
-            f"Telegram ID: <code>{user.id}</code>\n\n"
-            f"/reply {user.id} текст",
-        )
-    except Exception:
-        log.exception("admin notify failed")
+        price = money(parse_price_rub(product["price"], product))
+    except ValueError:
+        await callback.message.answer(tr(user.id, "unavailable"))
+        return
+    await safe_edit_or_send(callback,
+        tr(user.id, "purchase_method_choose", product=safe_stored_html(product["name"]), amount=price),
+        reply_markup=payment_methods_kb(price, get_user_language(user.id), product_id=product_id))
+
+
+@dp.callback_query(F.data.startswith("purchasepay:"))
+async def cb_purchase_method(callback: CallbackQuery, bot: Bot):
+    try:
+        _, method_raw, product_raw = callback.data.split(":")
+        method, product_id = int(method_raw), int(product_raw)
+        if method not in METHOD_FEES:
+            raise ValueError("Unsupported method")
+    except (ValueError, TypeError):
+        await callback.answer(tr(callback.from_user.id, "payment_method_invalid"), show_alert=True)
+        return
+    await callback.answer()
+    product = get_product(product_id)
+    if not product or not product.get("active", 1):
+        await callback.message.answer(tr(callback.from_user.id, "unavailable"))
+        return
+    try:
+        price = money(parse_price_rub(product["price"], product))
+    except ValueError:
+        await callback.message.answer(tr(callback.from_user.id, "unavailable"))
+        return
+    await create_payment_invoice(callback.message, callback.from_user, price, bot,
+                                 payment_method=method, product=product)
 
 
 # ─── profile ────────────────────────────────────────────────────────────────
@@ -970,12 +962,16 @@ async def cb_topup_method(callback: CallbackQuery, bot: Bot):
 
 
 async def create_topup(message: Message, user, amount: float, bot: Bot, payment_method: int = 2):
+    return await create_payment_invoice(message, user, amount, bot, payment_method=payment_method)
+
+
+async def create_payment_invoice(message: Message, user, amount, bot: Bot, payment_method: int = 2, product=None):
     if payment_method not in METHOD_FEES:
         await message.answer(tr(user.id, "payment_method_invalid"))
         return
     try:
         amount = float(money(amount))
-        minimum = money(get_setting("min_topup", "1"))
+        minimum = money(get_setting("min_topup", "1")) if product is None else money("0.01")
     except ValueError:
         await message.answer(tr(user.id, "number"))
         return
@@ -988,13 +984,16 @@ async def create_topup(message: Message, user, amount: float, bot: Bot, payment_
             tr(user.id, "payment_unavailable")
         )
         return
-    payload = f"topup:{user.id}:{amount}:method:{payment_method}"
+    purpose = "purchase" if product is not None else "topup"
+    payload = f"{purpose}:{user.id}:{amount}:method:{payment_method}"
+    if product is not None:
+        payload += f":product:{product['id']}"
     try:
         me = await bot.me()
         ret = f"https://t.me/{me.username}"
         data = await platega.create_payment(
             amount=amount,
-            description=f"Пополнение PLS Store #{user.id}",
+            description=(f"PLS Store: {plain_stored_text(product['name'])}" if product is not None else f"Пополнение PLS Store #{user.id}"),
             payload=payload,
             return_url=ret,
             failed_url=ret,
@@ -1023,19 +1022,28 @@ async def create_topup(message: Message, user, amount: float, bot: Bot, payment_
     tx_id = str(tx_id)
     with db() as conn:
         conn.execute(
-            "INSERT INTO payments (user_id, amount, platega_id, status, payload, redirect_url) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (user.id, amount, tx_id, "PENDING", payload, redirect),
+            "INSERT INTO payments (user_id, amount, platega_id, status, payload, redirect_url, purpose, product_id, product_name) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (user.id, amount, tx_id, "PENDING", payload, redirect, purpose,
+             product["id"] if product is not None else None,
+             product["name"] if product is not None else None),
         )
     rows = []
     if redirect:
         rows.append([InlineKeyboardButton(text=tr(user.id, "pay"), url=redirect)])
     rows.append([InlineKeyboardButton(text=tr(user.id, "check"), callback_data=f"paystatus:{tx_id}")])
-    rows.append([InlineKeyboardButton(text=tr(user.id, "to_profile"), callback_data="profile")])
+    if product is not None:
+        rows.append([InlineKeyboardButton(text=tr(user.id, "back"), callback_data=f"product:{product['id']}")])
+    else:
+        rows.append([InlineKeyboardButton(text=tr(user.id, "to_profile"), callback_data="profile")])
     label, fee = method_info(payment_method, get_user_language(user.id))
+    invoice_text = tr(user.id, "invoice", amount=amount, tx_id=tx_id)
+    fee_text = tr(user.id, "payment_method_details", method=label, fee=fee, amount=amount)
+    if product is not None:
+        invoice_text = tr(user.id, "purchase_invoice", product=safe_stored_html(product["name"]), amount=amount, tx_id=tx_id)
+        fee_text = tr(user.id, "purchase_fee_details", method=label, fee=fee)
     await message.answer(
-        tr(user.id, "invoice", amount=amount, tx_id=tx_id) + "\n\n" +
-        tr(user.id, "payment_method_details", method=label, fee=fee, amount=amount),
+        invoice_text + "\n\n" + fee_text,
         reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
     )
 
@@ -1072,7 +1080,7 @@ async def cb_pay_status(callback: CallbackQuery, bot: Bot):
                 str(exc), tx_id, owned["amount"], owned["currency"], provider_id,
                 details.get("amount"), details.get("currency"),
             )
-            await callback.message.answer("Оплата подтверждена Platega, но зачисление пока не выполнено. Повторно оплачивать счёт не нужно.")
+            await callback.message.answer("Оплата подтверждена Platega, но обработка платежа пока не завершена. Повторно оплачивать счёт не нужно.")
             if is_admin(callback.from_user.id):
                 diagnostic = (
                     f"Причина: {exc}\n"
@@ -1089,6 +1097,25 @@ async def process_confirmed_payment(tx_id: str, data: dict, bot: Bot) -> bool:
         return False
     user_id = result["user_id"]
     amount = result["amount"]
+    if result["purpose"] == "purchase":
+        try:
+            await bot.send_message(user_id,
+                tr(user_id, "purchase_paid", product=safe_stored_html(result["product_name"]), amount=amount),
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text=tr(user_id, "purchases").replace("<b>", "").replace("</b>", ""), callback_data="mypurchases")],
+                    [InlineKeyboardButton(text=tr(user_id, "home"), callback_data="home")],
+                ]))
+        except Exception:
+            log.warning("Purchase recorded but buyer notification failed")
+        if ADMIN_ID:
+            try:
+                await bot.send_message(ADMIN_ID,
+                    f"✅ <b>Оплачена покупка #{result['purchase_id']}</b>\n"
+                    f"Товар: {safe_stored_html(result['product_name'])}\n"
+                    f"Цена: {amount:.2f}₽\nПокупатель: <code>{user_id}</code>")
+            except Exception:
+                log.warning("Purchase recorded but admin notification failed")
+        return True
     new_bal = result["balance"]
     try:
         await bot.send_message(
@@ -1362,7 +1389,7 @@ async def adm_design_save(message: Message, state: FSMContext):
 
 
 # --- banners ---
-BANNER_KEYS = ["home", "profile", "shop", "faq", "topup", "language"]
+BANNER_KEYS = ["home", "profile", "shop", "faq", "topup", "language", "plugins"]
 
 
 @dp.callback_query(F.data == "adm:banners")

@@ -52,6 +52,30 @@ def settle_payment(tx_id: str, data: dict):
         user = conn.execute('SELECT * FROM users WHERE user_id=?', (user_id,)).fetchone()
         if user is None:
             raise ValueError('Payment user does not exist')
+        if row['purpose'] == 'purchase':
+            if not row['product_id'] or not row['product_name']:
+                raise ValueError('Purchase invoice has no product snapshot')
+            purchase = conn.execute(
+                'INSERT INTO purchases(user_id,product_id,price,product_name) VALUES(?,?,?,?)',
+                (user_id,row['product_id'],float(amount),row['product_name']),
+            )
+            conn.execute(
+                'UPDATE users SET total_spent=total_spent+?, purchases_count=purchases_count+1 WHERE user_id=?',
+                (float(amount),user_id),
+            )
+            conn.execute(
+                "INSERT INTO orders(user_id,username,product_id,status) VALUES(?,?,?,'completed')",
+                (user_id,user['username'],row['product_id']),
+            )
+            conn.execute(
+                "UPDATE payments SET status='CONFIRMED',confirmed_at=CURRENT_TIMESTAMP,purchase_id=? WHERE id=?",
+                (purchase.lastrowid,row['id']),
+            )
+            return dict(purpose='purchase',user_id=user_id,amount=float(amount),balance=user['balance'],
+                        purchase_id=purchase.lastrowid,product_name=row['product_name'],
+                        referrer_id=None,referral_bonus=0)
+        if row['purpose'] != 'topup':
+            raise ValueError('Unknown payment purpose')
         balance = float((Decimal(str(user['balance'])) + amount).quantize(Decimal('0.01')))
         conn.execute('UPDATE users SET balance=? WHERE user_id=?', (balance, user_id))
         conn.execute('INSERT INTO balance_log(user_id, delta, reason, payment_id) VALUES (?, ?, ?, ?)',
@@ -78,5 +102,5 @@ def settle_payment(tx_id: str, data: dict):
                 conn.execute('INSERT INTO balance_log(user_id, delta, reason, payment_id) VALUES (?, ?, ?, ?)',
                              (referrer_id, float(bonus), f'Referral {user_id} topup {tx_id}', row['id']))
         conn.execute("UPDATE payments SET status='CONFIRMED', confirmed_at=CURRENT_TIMESTAMP WHERE id=?", (row['id'],))
-        return dict(user_id=user_id, amount=float(amount), balance=balance,
+        return dict(purpose='topup', user_id=user_id, amount=float(amount), balance=balance,
                     referrer_id=referrer_id, referral_bonus=float(bonus))
