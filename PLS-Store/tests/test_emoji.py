@@ -43,6 +43,25 @@ class EmojiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result[3].text, '🇺🇦 Українська')
         self.assertEqual(markup.inline_keyboard[0][0].text, '🎧 Support')
 
+    def test_screenshot_icons_and_colored_flag_ids(self):
+        icons = ['🔒', '📜', '💵', '🎧', '🗓', '🚀', '☑', '✏', '🇷🇺', '🇺🇦', '🇬🇧']
+        ids = {emoji: str(1000 + i) for i, emoji in enumerate(icons)}
+        with patch('services.emoji.get_setting', return_value=json.dumps(ids)):
+            middleware = PackEmojiMiddleware()
+        for emoji in icons:
+            self.assertIn(f'emoji-id="{ids[emoji]}"', middleware.render_html(emoji + ' Текст'))
+        rows = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text='🇷🇺 Русский ✓', callback_data='lang:set:ru'),
+            InlineKeyboardButton(text='🇺🇦 Українська', callback_data='lang:set:uk'),
+            InlineKeyboardButton(text='🇬🇧 English', callback_data='lang:set:en'),
+            InlineKeyboardButton(text='✏️ Своя сумма', callback_data='topup:custom'),
+        ]])
+        result = middleware.keyboard(rows).inline_keyboard[0]
+        for button, glyph in zip(result, ['🇷🇺', '🇺🇦', '🇬🇧', '✏']):
+            self.assertEqual(button.icon_custom_emoji_id, ids[glyph])
+            self.assertNotIn(glyph, button.text)
+        self.assertEqual(result[0].text, 'Русский ✓')
+
     async def test_message_and_edit_media_are_transformed(self):
         request = AsyncMock(return_value='ok')
         original = SendMessage(chat_id=1, text='👤 Profile')

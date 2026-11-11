@@ -22,8 +22,13 @@ BUTTON_EMOJI = {
     "language": "🌐", "faq": "❓", "support": "🎧", "documents": "📄",
     "topup": "💳", "mypurchases": "🛒", "api_info": "💻",
     "promo": "🎟", "referral": "👥", "home": "🏠",
+    "lang:set:ru": "🇷🇺", "lang:set:uk": "🇺🇦", "lang:set:en": "🇬🇧",
+    "topup:custom": "✏️",
 }
-ALIASES = {"🆔": "👤", "💲": "💰", "💸": "🧾", "💬": "🎧", "🔗": "🔗"}
+ALIASES = {
+    "🆔": "👤", "💲": "💰", "💸": "🧾", "💬": "🎧",
+    "🗓": "📅", "☑": "✅",
+}
 
 
 def normalized(emoji: str) -> str:
