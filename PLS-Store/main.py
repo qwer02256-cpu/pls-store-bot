@@ -442,7 +442,7 @@ def banner_path(key: str) -> Path | None:
         if p.is_file():
             return p
     # Uploaded banners take precedence over bundled section defaults.
-    if key in {"profile", "faq", "language", "shop", "plugins"}:
+    if key in set(BANNER_KEYS) - {"home"}:
         bundled = ASSETS_DIR / f"{key}.png"
         if bundled.is_file():
             return bundled
@@ -454,6 +454,11 @@ def banner_path(key: str) -> Path | None:
 async def safe_edit_or_send(target, text: str, reply_markup=None, photo: Path | None = None):
     """Update callback screens in place to avoid Telegram's deletion animation."""
     message = target if isinstance(target, Message) else target.message
+    if photo and photo.is_file() and len(text) > 1024:
+        # Long purchase histories exceed Telegram's photo-caption limit.
+        await message.answer_photo(photo=FSInputFile(photo))
+        await message.answer(text, reply_markup=reply_markup, link_preview_options=NO_PREVIEW)
+        return
     if not isinstance(target, Message):
         try:
             if photo and photo.is_file():
@@ -557,7 +562,7 @@ def license_gate_keyboard(license_url: str, user_id: int) -> InlineKeyboardMarku
 async def show_license_gate(target, user_id: int) -> None:
     license_url = get_setting("license_url", "")
     text = tr(user_id, "license_title")
-    await safe_edit_or_send(target, text, reply_markup=license_gate_keyboard(license_url, user_id))
+    await safe_edit_or_send(target, text, reply_markup=license_gate_keyboard(license_url, user_id), photo=banner_path("documents"))
 
 
 # ─── home / catalog / product ───────────────────────────────────────────────
@@ -820,7 +825,7 @@ async def cb_mypurchases(callback: CallbackQuery):
                 f"  <i>{r['created_at']}</i>"
             )
         text = "\n".join(lines)
-    await safe_edit_or_send(callback, text, reply_markup=back_kb("profile"))
+    await safe_edit_or_send(callback, text, reply_markup=back_kb("profile"), photo=banner_path("purchases"))
 
 
 @dp.callback_query(F.data == "api_info")
@@ -904,7 +909,7 @@ async def cb_referral(callback: CallbackQuery, bot: Bot):
     else:
         text = (f"🔗 <b>Реферальная система</b>\n\nВаша ссылка:\n<code>{link}</code>\n\n"
                 f"Вы получаете <b>{pct}%</b> от пополнений приглашённых.\nПриглашено: <b>{ref_count}</b>\nЗаработано: <b>{earned:.0f}₽</b>")
-    await safe_edit_or_send(callback, text, reply_markup=back_kb("profile", get_user_language(callback.from_user.id)))
+    await safe_edit_or_send(callback, text, reply_markup=back_kb("profile", get_user_language(callback.from_user.id)), photo=banner_path("referral"))
 
 
 # ─── topup / Platega ────────────────────────────────────────────────────────
@@ -960,7 +965,7 @@ async def show_payment_methods(target, user, amount):
         return False
     lang = get_user_language(user.id)
     await safe_edit_or_send(target, tr(user.id, "payment_method_choose", amount=amount),
-                            reply_markup=payment_methods_kb(amount, lang))
+                            reply_markup=payment_methods_kb(amount, lang), photo=banner_path("topup"))
     return True
 
 
@@ -1200,7 +1205,7 @@ async def cb_documents(callback: CallbackQuery):
     rows = document_rows(lang)
     rows += [[support_button(lang, style=None)],
              [design_button("btn_back", tr(callback.from_user.id, "back"), "faq", "danger")]]
-    await safe_edit_or_send(callback, tr(callback.from_user.id, "documents"), reply_markup=InlineKeyboardMarkup(inline_keyboard=rows), photo=banner_path("faq"))
+    await safe_edit_or_send(callback, tr(callback.from_user.id, "documents"), reply_markup=InlineKeyboardMarkup(inline_keyboard=rows), photo=banner_path("documents"))
 
 
 # ─── support / reviews ──────────────────────────────────────────────────────
@@ -1227,7 +1232,7 @@ async def cb_support(event: Message | CallbackQuery):
     else:
         target = event
     text, keyboard = support_screen(event.from_user.id)
-    await safe_edit_or_send(target, text, reply_markup=keyboard)
+    await safe_edit_or_send(target, text, reply_markup=keyboard, photo=banner_path("support"))
 
 
 @dp.callback_query(F.data == "reviews")
@@ -1243,7 +1248,7 @@ async def cb_reviews(callback: CallbackQuery):
     else:
         kb = back_kb("home")
         text = tr(callback.from_user.id, "reviews_unset")
-    await safe_edit_or_send(callback, text, reply_markup=kb)
+    await safe_edit_or_send(callback, text, reply_markup=kb, photo=banner_path("reviews"))
 
 
 # ─── admin panel (extended) ─────────────────────────────────────────────────
@@ -1405,7 +1410,8 @@ async def adm_design_save(message: Message, state: FSMContext):
 
 
 # --- banners ---
-BANNER_KEYS = ["home", "profile", "shop", "faq", "topup", "language", "plugins"]
+BANNER_KEYS = ["home", "profile", "shop", "faq", "topup", "language", "plugins",
+               "documents", "support", "reviews", "purchases", "referral"]
 
 
 @dp.callback_query(F.data == "adm:banners")

@@ -1,0 +1,14 @@
+[
+  {"key":"home","file":"banner.png","atlas":1,"cell":[0,0],"title":["PLS Store"],"subtitle":["Плагины и дополнения","для FunPayCardinal"]},
+  {"key":"shop","file":"shop.png","atlas":1,"cell":[1,0],"title":["Магазин"],"subtitle":["Выберите категорию"]},
+  {"key":"plugins","file":"plugins.png","atlas":1,"cell":[0,1],"title":["Плагины"],"subtitle":["Для FunPayCardinal"]},
+  {"key":"profile","file":"profile.png","atlas":1,"cell":[1,1],"title":["Профиль"],"subtitle":["Баланс и покупки"]},
+  {"key":"topup","file":"topup.png","atlas":2,"cell":[0,0],"title":["Пополнение","баланса"],"subtitle":["Выберите сумму и способ оплаты"]},
+  {"key":"language","file":"language.png","atlas":2,"cell":[1,0],"title":["Выберите","язык"],"subtitle":["Русский · Українська · English"]},
+  {"key":"faq","file":"faq.png","atlas":2,"cell":[0,1],"title":["FAQ"],"subtitle":["Частые вопросы"]},
+  {"key":"documents","file":"documents.png","atlas":2,"cell":[1,1],"title":["Документы"],"subtitle":["Политика конфиденциальности","Пользовательское соглашение","Товары и тарифы"]},
+  {"key":"support","file":"support.png","atlas":3,"cell":[0,0],"title":["Поддержка"],"subtitle":["Связаться с поддержкой"]},
+  {"key":"reviews","file":"reviews.png","atlas":3,"cell":[1,0],"title":["Отзывы"],"subtitle":[]},
+  {"key":"purchases","file":"purchases.png","atlas":3,"cell":[0,1],"title":["Мои покупки"],"subtitle":["История покупок"]},
+  {"key":"referral","file":"referral.png","atlas":3,"cell":[1,1],"title":["Реферальная","система"],"subtitle":["Ваша ссылка для приглашений"]}
+]
