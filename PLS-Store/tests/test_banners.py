@@ -6,9 +6,29 @@ from unittest.mock import AsyncMock
 from types import SimpleNamespace
 
 import main
+from services import db
 
 
 class BannerTests(unittest.TestCase):
+    def test_series_upgrade_backs_up_overrides_once_and_keeps_later_uploads(self):
+        with TemporaryDirectory() as tmp, patch.object(db, "DB_PATH", Path(tmp) / "store.db"):
+            db.init_db()
+            with db.db() as conn:
+                conn.execute("DELETE FROM bot_settings WHERE key='banner_series_2026_11_applied'")
+            db.set_setting("banner_home", "old-home.jpg")
+            db.set_setting("banner_faq", "old-faq.jpg")
+            db.set_setting("support_username", "owner_support")
+            db.init_db()
+            self.assertEqual(db.get_setting("banner_home"), "")
+            self.assertEqual(db.get_setting("banner_faq"), "")
+            self.assertEqual(db.get_setting("banner_home_before_series_2026_11"), "old-home.jpg")
+            self.assertEqual(db.get_setting("banner_faq_before_series_2026_11"), "old-faq.jpg")
+            self.assertEqual(db.get_setting("support_username"), "owner_support")
+            db.set_setting("banner_home", "new-owner-upload.jpg")
+            db.init_db()
+            self.assertEqual(db.get_setting("banner_home"), "new-owner-upload.jpg")
+            self.assertEqual(db.get_setting("banner_home_before_series_2026_11"), "old-home.jpg")
+
     def test_every_section_has_a_bundled_banner(self):
         with patch.object(main, "get_setting", return_value=""):
             for key in main.BANNER_KEYS:

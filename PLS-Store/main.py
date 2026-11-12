@@ -2024,6 +2024,9 @@ async def setup_bot_commands(bot: Bot):
 async def main():
     require_config()
     init_db()
+    available_banners = sum(banner_path(key) is not None for key in BANNER_KEYS)
+    log.info("Banner release: pls-purple-2026-11-v2 | available=%s/%s | previous overrides archived",
+             available_banners, len(BANNER_KEYS))
     seed_if_empty()
     bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     emoji_middleware = PackEmojiMiddleware()

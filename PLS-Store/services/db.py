@@ -238,6 +238,24 @@ def init_db() -> None:
                 "INSERT INTO bot_settings(key, value) VALUES ('min_topup_one_ruble_applied', '1')"
             )
 
+        # Activate the new bundled series once, retaining prior upload settings.
+        # Later admin uploads must survive every subsequent restart.
+        if not conn.execute(
+            "SELECT 1 FROM bot_settings WHERE key='banner_series_2026_11_applied'"
+        ).fetchone():
+            for section in ("home", "profile", "shop", "faq", "topup", "language",
+                            "plugins", "documents", "support", "reviews", "purchases", "referral"):
+                key = f"banner_{section}"
+                conn.execute(
+                    "INSERT OR IGNORE INTO bot_settings(key, value) "
+                    "SELECT ?, value FROM bot_settings WHERE key=?",
+                    (f"{key}_before_series_2026_11", key),
+                )
+                conn.execute("DELETE FROM bot_settings WHERE key=?", (key,))
+            conn.execute(
+                "INSERT INTO bot_settings(key, value) VALUES ('banner_series_2026_11_applied', '1')"
+            )
+
         # seed FAQ if empty
         faq_count = conn.execute("SELECT COUNT(*) AS c FROM faq").fetchone()["c"]
         if faq_count == 0:
