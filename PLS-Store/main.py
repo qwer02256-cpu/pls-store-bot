@@ -434,13 +434,22 @@ def safe_stored_html(value: str | None) -> str:
     return "".join(parts)
 
 
-def banner_path(key: str) -> Path | None:
-    """Return path to section banner if exists."""
-    name = get_setting(f"banner_{key}", "")
+def banner_path(key: str, lang: str = "ru") -> Path | None:
+    """Resolve a language-specific upload or bundled image; fall back to Russian."""
+    lang = lang if lang in {"ru", "en", "uk"} else "ru"
+    name = get_setting(f"banner_{key}_{lang}", "")
+    if not name and lang == "ru":
+        name = get_setting(f"banner_{key}", "")
     if name:
         p = BANNERS_DIR / name
         if p.is_file():
             return p
+    if lang != "ru" and key in BANNER_KEYS:
+        filename = "banner.png" if key == "home" else f"{key}.png"
+        localized = ASSETS_DIR / lang / filename
+        if localized.is_file():
+            return localized
+        return banner_path(key, "ru")
     # Uploaded banners take precedence over bundled section defaults.
     if key in set(BANNER_KEYS) - {"home"}:
         bundled = ASSETS_DIR / f"{key}.png"
@@ -562,7 +571,7 @@ def license_gate_keyboard(license_url: str, user_id: int) -> InlineKeyboardMarku
 async def show_license_gate(target, user_id: int) -> None:
     license_url = get_setting("license_url", "")
     text = tr(user_id, "license_title")
-    await safe_edit_or_send(target, text, reply_markup=license_gate_keyboard(license_url, user_id), photo=banner_path("documents"))
+    await safe_edit_or_send(target, text, reply_markup=license_gate_keyboard(license_url, user_id), photo=banner_path("documents", get_user_language(user_id)))
 
 
 # ─── home / catalog / product ───────────────────────────────────────────────
@@ -574,7 +583,7 @@ async def show_home(target, first_name: str):
     safe_name = html.escape(user.username or first_name or user.first_name or "—")
     balance = f"{account['balance']:.2f}".rstrip("0").rstrip(".")
     text = welcome_template.replace("{first_name}", safe_name).replace("{balance}", balance)
-    photo = banner_path("home")
+    photo = banner_path("home", lang)
     await safe_edit_or_send(target, text, reply_markup=main_menu_kb(lang), photo=photo)
 
 
@@ -592,7 +601,7 @@ async def render_catalog(target) -> None:
         [design_button("btn_back", "« Back" if lang == "en" else "« Назад", "home", "danger")],
     ])
     text = f"<b>{tr(user_id, 'shop')}</b>\n━━━━━━━━━━━━━━━━━━━━\n\n{prompt}"
-    await safe_edit_or_send(target, text, reply_markup=markup, photo=banner_path("shop"))
+    await safe_edit_or_send(target, text, reply_markup=markup, photo=banner_path("shop", lang))
 
 
 async def render_plugins(target) -> None:
@@ -615,7 +624,7 @@ async def render_plugins(target) -> None:
         text = f"<b>{tr(target.from_user.id, 'plugins_title')}</b>\n\n{tr(target.from_user.id, 'choose_product')}"
         markup = builder.as_markup()
 
-    photo = banner_path("plugins")
+    photo = banner_path("plugins", get_user_language(target.from_user.id))
     await safe_edit_or_send(target, text, reply_markup=markup, photo=photo)
 
 
@@ -803,7 +812,7 @@ async def cb_profile(event: Message | CallbackQuery):
         return
     lang = get_user_language(user.id)
     text = profile_text(user.id, user, lang)
-    photo = banner_path("profile")
+    photo = banner_path("profile", lang)
     await safe_edit_or_send(target, text, reply_markup=profile_kb(lang), photo=photo)
 
 
@@ -825,7 +834,7 @@ async def cb_mypurchases(callback: CallbackQuery):
                 f"  <i>{r['created_at']}</i>"
             )
         text = "\n".join(lines)
-    await safe_edit_or_send(callback, text, reply_markup=back_kb("profile"), photo=banner_path("purchases"))
+    await safe_edit_or_send(callback, text, reply_markup=back_kb("profile"), photo=banner_path("purchases", get_user_language(callback.from_user.id)))
 
 
 @dp.callback_query(F.data == "api_info")
@@ -909,7 +918,7 @@ async def cb_referral(callback: CallbackQuery, bot: Bot):
     else:
         text = (f"🔗 <b>Реферальная система</b>\n\nВаша ссылка:\n<code>{link}</code>\n\n"
                 f"Вы получаете <b>{pct}%</b> от пополнений приглашённых.\nПриглашено: <b>{ref_count}</b>\nЗаработано: <b>{earned:.0f}₽</b>")
-    await safe_edit_or_send(callback, text, reply_markup=back_kb("profile", get_user_language(callback.from_user.id)), photo=banner_path("referral"))
+    await safe_edit_or_send(callback, text, reply_markup=back_kb("profile", get_user_language(callback.from_user.id)), photo=banner_path("referral", get_user_language(callback.from_user.id)))
 
 
 # ─── topup / Platega ────────────────────────────────────────────────────────
@@ -918,7 +927,7 @@ async def cb_topup(callback: CallbackQuery):
     await callback.answer()
     ensure_user(callback.from_user.id, callback.from_user.username, callback.from_user.first_name)
     text = f"<b>{tr(callback.from_user.id, 'topup_title')}</b>\n\n{tr(callback.from_user.id, 'topup_choose')}"
-    photo = banner_path("topup")
+    photo = banner_path("topup", get_user_language(callback.from_user.id))
     await safe_edit_or_send(callback, text, reply_markup=topup_amounts_kb(get_user_language(callback.from_user.id)), photo=photo)
 
 
@@ -965,7 +974,7 @@ async def show_payment_methods(target, user, amount):
         return False
     lang = get_user_language(user.id)
     await safe_edit_or_send(target, tr(user.id, "payment_method_choose", amount=amount),
-                            reply_markup=payment_methods_kb(amount, lang), photo=banner_path("topup"))
+                            reply_markup=payment_methods_kb(amount, lang), photo=banner_path("topup", lang))
     return True
 
 
@@ -1173,7 +1182,7 @@ async def cb_language(callback: CallbackQuery):
     await callback.answer()
     lang = get_user_language(callback.from_user.id)
     kb = language_kb(lang)
-    await safe_edit_or_send(callback, tr(callback.from_user.id, "language_title"), reply_markup=kb, photo=banner_path("language"))
+    await safe_edit_or_send(callback, tr(callback.from_user.id, "language_title"), reply_markup=kb, photo=banner_path("language", lang))
 
 
 @dp.callback_query(F.data.startswith("lang:set:"))
@@ -1195,7 +1204,7 @@ async def cb_faq(callback: CallbackQuery):
         [design_button("btn_documents", ("📄 Documents" if get_user_language(callback.from_user.id) == "en" else ("📄 Документи" if get_user_language(callback.from_user.id) == "uk" else "📄 Документы")), "documents", "primary")],
         [design_button("btn_back", ("« Back" if get_user_language(callback.from_user.id) == "en" else "« Назад"), "home", "danger")],
     ])
-    await safe_edit_or_send(callback, f"<b>{tr(callback.from_user.id, 'faq_title')}</b>\n━━━━━━━━━━━━━━━━━━━━\n\n{tr(callback.from_user.id, 'faq')}", reply_markup=markup, photo=banner_path("faq"))
+    await safe_edit_or_send(callback, f"<b>{tr(callback.from_user.id, 'faq_title')}</b>\n━━━━━━━━━━━━━━━━━━━━\n\n{tr(callback.from_user.id, 'faq')}", reply_markup=markup, photo=banner_path("faq", get_user_language(callback.from_user.id)))
 
 
 @dp.callback_query(F.data == "documents")
@@ -1205,7 +1214,7 @@ async def cb_documents(callback: CallbackQuery):
     rows = document_rows(lang)
     rows += [[support_button(lang, style=None)],
              [design_button("btn_back", tr(callback.from_user.id, "back"), "faq", "danger")]]
-    await safe_edit_or_send(callback, tr(callback.from_user.id, "documents"), reply_markup=InlineKeyboardMarkup(inline_keyboard=rows), photo=banner_path("documents"))
+    await safe_edit_or_send(callback, tr(callback.from_user.id, "documents"), reply_markup=InlineKeyboardMarkup(inline_keyboard=rows), photo=banner_path("documents", lang))
 
 
 # ─── support / reviews ──────────────────────────────────────────────────────
@@ -1232,7 +1241,7 @@ async def cb_support(event: Message | CallbackQuery):
     else:
         target = event
     text, keyboard = support_screen(event.from_user.id)
-    await safe_edit_or_send(target, text, reply_markup=keyboard, photo=banner_path("support"))
+    await safe_edit_or_send(target, text, reply_markup=keyboard, photo=banner_path("support", get_user_language(event.from_user.id)))
 
 
 @dp.callback_query(F.data == "reviews")
@@ -1248,7 +1257,7 @@ async def cb_reviews(callback: CallbackQuery):
     else:
         kb = back_kb("home")
         text = tr(callback.from_user.id, "reviews_unset")
-    await safe_edit_or_send(callback, text, reply_markup=kb, photo=banner_path("reviews"))
+    await safe_edit_or_send(callback, text, reply_markup=kb, photo=banner_path("reviews", get_user_language(callback.from_user.id)))
 
 
 # ─── admin panel (extended) ─────────────────────────────────────────────────
@@ -1414,22 +1423,28 @@ BANNER_KEYS = ["home", "profile", "shop", "faq", "topup", "language", "plugins",
                "documents", "support", "reviews", "purchases", "referral"]
 
 
-@dp.callback_query(F.data == "adm:banners")
+@dp.callback_query((F.data == "adm:banners") | F.data.startswith("adm:banners:"))
 async def adm_banners(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
         return
     await callback.answer()
-    rows = []
+    lang = callback.data.rsplit(":", 1)[-1]
+    lang = lang if lang in {"ru", "en", "uk"} else "ru"
+    rows = [[InlineKeyboardButton(text=label + (" ✓" if code == lang else ""),
+                                 callback_data=f"adm:banners:{code}")
+             for code, label in (("ru", "Русский"), ("en", "English"), ("uk", "Українська"))]]
     for k in BANNER_KEYS:
-        cur = get_setting(f"banner_{k}", "—")
+        cur = get_setting(f"banner_{k}_{lang}", "")
+        if not cur and lang == "ru":
+            cur = get_setting(f"banner_{k}", "")
         rows.append([InlineKeyboardButton(
-            text=f"🖼 {k}: {cur}",
-            callback_data=f"adm:ban:{k}",
+            text=f"🖼 {k}: {cur or 'встроенный'}",
+            callback_data=f"adm:ban:{k}:{lang}",
         )])
     rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="adm:home")])
     await safe_edit_or_send(
         callback,
-        "🖼 <b>Баннеры разделов</b>\n\nВыберите раздел и отправьте новое фото.",
+        f"🖼 <b>Баннеры разделов — {lang}</b>\n\nВыберите язык, затем раздел и отправьте новое фото.",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
     )
 
@@ -1438,11 +1453,16 @@ async def adm_banners(callback: CallbackQuery):
 async def adm_banner_start(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
         return
-    key = callback.data.split(":")[2]
+    parts = callback.data.split(":")
+    key = parts[2]
+    lang = parts[3] if len(parts) > 3 else "ru"
+    if key not in BANNER_KEYS or lang not in {"ru", "en", "uk"}:
+        await callback.answer("Неизвестный раздел или язык", show_alert=True)
+        return
     await state.set_state(ProductWizard.set_banner)
-    await state.update_data(banner_key=key)
+    await state.update_data(banner_key=key, banner_lang=lang)
     await callback.answer()
-    await callback.message.answer(f"Отправьте фото для баннера «{key}» (или /cancel):")
+    await callback.message.answer(f"Отправьте фото для баннера «{key}», язык {lang} (или /cancel):")
 
 
 @dp.message(ProductWizard.set_banner, F.photo)
@@ -1451,13 +1471,17 @@ async def adm_banner_save(message: Message, bot: Bot, state: FSMContext):
         return
     data = await state.get_data()
     key = data.get("banner_key", "home")
+    lang = data.get("banner_lang", "ru")
+    if key not in BANNER_KEYS or lang not in {"ru", "en", "uk"}:
+        await state.clear()
+        return
     photo = message.photo[-1]
-    filename = f"{key}_{photo.file_unique_id}.jpg"
+    filename = f"{key}_{lang}_{photo.file_unique_id}.jpg"
     dest = BANNERS_DIR / filename
     await bot.download(photo, destination=dest)
-    set_setting(f"banner_{key}", filename)
+    set_setting(f"banner_{key}_{lang}", filename)
     # also update main banner if home
-    if key == "home":
+    if key == "home" and lang == "ru":
         try:
             import shutil
             shutil.copy(dest, BANNER_PATH)
@@ -1465,9 +1489,9 @@ async def adm_banner_save(message: Message, bot: Bot, state: FSMContext):
             pass
     await state.clear()
     await message.answer(
-        f"✅ Баннер «{key}» обновлён.",
+        f"✅ Баннер «{key}» ({lang}) обновлён.",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🖼 К баннерам", callback_data="adm:banners")],
+            [InlineKeyboardButton(text="🖼 К баннерам", callback_data=f"adm:banners:{lang}")],
             [InlineKeyboardButton(text="🛠 Админка", callback_data="adm:home")],
         ]),
     )
@@ -2024,9 +2048,10 @@ async def setup_bot_commands(bot: Bot):
 async def main():
     require_config()
     init_db()
-    available_banners = sum(banner_path(key) is not None for key in BANNER_KEYS)
-    log.info("Banner release: pls-purple-2026-11-v3 | available=%s/%s | previous overrides archived",
-             available_banners, len(BANNER_KEYS))
+    available_banners = sum(banner_path(key, lang) is not None
+                            for lang in ("ru", "en", "uk") for key in BANNER_KEYS)
+    log.info("Banner release: pls-purple-2026-11-v4-i18n | available=%s/%s | languages=ru,en,uk",
+             available_banners, len(BANNER_KEYS) * 3)
     seed_if_empty()
     bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     emoji_middleware = PackEmojiMiddleware()

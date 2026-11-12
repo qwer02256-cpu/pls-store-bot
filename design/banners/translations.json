@@ -1,0 +1,30 @@
+{
+  "en": {
+    "home": {"title": ["PLS Store"], "subtitle": ["Plugins and add-ons", "for FunPayCardinal"]},
+    "shop": {"title": ["Shop"], "subtitle": ["Choose a category"]},
+    "plugins": {"title": ["Plugins"], "subtitle": ["For FunPayCardinal"]},
+    "profile": {"title": ["Profile"], "subtitle": ["Balance and purchases"]},
+    "topup": {"title": ["Top up", "balance"], "subtitle": ["Choose an amount and", "a payment method"]},
+    "language": {"title": ["Select", "language"], "subtitle": ["Русский · Українська · English"]},
+    "faq": {"title": ["FAQ"], "subtitle": ["Frequently asked questions"]},
+    "documents": {"title": ["Documents"], "subtitle": ["Privacy Policy", "User Agreement", "Products and Pricing"]},
+    "support": {"title": ["Support"], "subtitle": ["Contact support"]},
+    "reviews": {"title": ["Reviews"], "subtitle": []},
+    "purchases": {"title": ["My purchases"], "subtitle": ["Purchase history"]},
+    "referral": {"title": ["Referral", "program"], "subtitle": ["Your invitation link"]}
+  },
+  "uk": {
+    "home": {"title": ["PLS Store"], "subtitle": ["Плагіни та доповнення", "для FunPayCardinal"]},
+    "shop": {"title": ["Магазин"], "subtitle": ["Виберіть категорію"]},
+    "plugins": {"title": ["Плагіни"], "subtitle": ["Для FunPayCardinal"]},
+    "profile": {"title": ["Профіль"], "subtitle": ["Баланс і покупки"]},
+    "topup": {"title": ["Поповнення", "балансу"], "subtitle": ["Виберіть суму та спосіб оплати"]},
+    "language": {"title": ["Виберіть", "мову"], "subtitle": ["Русский · Українська · English"]},
+    "faq": {"title": ["FAQ"], "subtitle": ["Поширені запитання"]},
+    "documents": {"title": ["Документи"], "subtitle": ["Політика конфіденційності", "Угода користувача", "Товари й тарифи"]},
+    "support": {"title": ["Підтримка"], "subtitle": ["Зв’язатися з підтримкою"]},
+    "reviews": {"title": ["Відгуки"], "subtitle": []},
+    "purchases": {"title": ["Мої покупки"], "subtitle": ["Історія покупок"]},
+    "referral": {"title": ["Реферальна", "система"], "subtitle": ["Ваше посилання", "для запрошень"]}
+  }
+}

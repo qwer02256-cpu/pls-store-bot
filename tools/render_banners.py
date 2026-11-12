@@ -31,8 +31,14 @@ def make_brand():
     return brand
 
 
-def render(only=None):
+def render(only=None, lang="ru"):
     spec = json.loads((DESIGN / "series.json").read_text())
+    if lang != "ru":
+        translations = json.loads((DESIGN / "translations.json").read_text())[lang]
+        assert set(translations) == {item["key"] for item in spec}
+        spec = [dict(item, **translations[item["key"]]) for item in spec]
+    output_dir = ASSETS if lang == "ru" else ASSETS / lang
+    output_dir.mkdir(parents=True, exist_ok=True)
     brand = make_brand()
     thumbs = []
     for item in spec:
@@ -65,7 +71,7 @@ def render(only=None):
                 draw.text((76, y), line, font=font(48), fill="#ddc6f4")
                 y += 60
         assert y < 715
-        out = ASSETS / item["file"]
+        out = output_dir / item["file"]
         canvas.convert("RGB").save(out, optimize=True)
         box = (*BRAND_POSITION, BRAND_POSITION[0]+BRAND_SIZE[0], BRAND_POSITION[1]+BRAND_SIZE[1])
         expected = background.crop(box).convert("RGBA")
@@ -76,17 +82,21 @@ def render(only=None):
         exported = Image.open(out).crop(box)
         assert Image.composite(exported, brand.convert("RGB"), opaque).tobytes() == brand.convert("RGB").tobytes()
     for item in spec:
-        thumb = Image.open(ASSETS / item["file"]).convert("RGB").resize((480, 270), Image.Resampling.LANCZOS)
+        thumb = Image.open(output_dir / item["file"]).convert("RGB").resize((480, 270), Image.Resampling.LANCZOS)
         thumbs.append(thumb)
     sheet = Image.new("RGB", (1440, 1080), "#0f031c")
     for i, thumb in enumerate(thumbs):
         sheet.paste(thumb, ((i % 3)*480, (i // 3)*270))
-    sheet.save(DESIGN / "contact-sheet.jpg", quality=93)
+    sheet_name = "contact-sheet.jpg" if lang == "ru" else f"contact-sheet-{lang}.jpg"
+    sheet.save(DESIGN / sheet_name, quality=93)
     count = sum(not only or item["key"] in only for item in spec)
-    print(f"Rendered and verified {count} banners, {SIZE[0]}×{SIZE[1]}; identical brand layer and opaque pixels.")
+    print(f"{lang}: rendered and verified {count} banners, {SIZE[0]}×{SIZE[1]}; identical brand layer and opaque pixels.")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--only", nargs="+", help="Rebuild selected section keys")
-    render(parser.parse_args().only)
+    parser.add_argument("--languages", nargs="+", choices=("ru", "en", "uk"), default=["ru", "en", "uk"])
+    args = parser.parse_args()
+    for language in args.languages:
+        render(args.only, language)
