@@ -6,7 +6,7 @@
   {"key":"topup","file":"topup.png","atlas":2,"cell":[0,0],"title":["Пополнение","баланса"],"subtitle":["Выберите сумму и способ оплаты"]},
   {"key":"language","file":"language.png","atlas":2,"cell":[1,0],"title":["Выберите","язык"],"subtitle":["Русский · Українська · English"]},
   {"key":"faq","file":"faq.png","atlas":2,"cell":[0,1],"title":["FAQ"],"subtitle":["Частые вопросы"]},
-  {"key":"documents","file":"documents.png","atlas":2,"cell":[1,1],"title":["Документы"],"subtitle":["Политика конфиденциальности","Пользовательское соглашение","Товары и тарифы"]},
+  {"key":"documents","file":"documents.png","atlas":2,"cell":[1,1],"title":["Документы"],"subtitle":["Политика конфиденциальности","Соглашение","Товары и тарифы"]},
   {"key":"support","file":"support.png","atlas":3,"cell":[0,0],"title":["Поддержка"],"subtitle":["Связаться с поддержкой"]},
   {"key":"reviews","file":"reviews.png","atlas":3,"cell":[1,0],"title":["Отзывы"],"subtitle":[]},
   {"key":"purchases","file":"purchases.png","atlas":3,"cell":[0,1],"title":["Мои покупки"],"subtitle":["История покупок"]},

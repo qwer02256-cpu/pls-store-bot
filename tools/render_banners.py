@@ -8,8 +8,8 @@ ROOT = Path(__file__).resolve().parents[1]
 DESIGN = ROOT / "design/banners"
 ASSETS = ROOT / "PLS-Store/assets"
 SIZE = (1600, 900)
-BRAND_POSITION = (1220, 56)
-BRAND_SIZE = (316, 92)
+BRAND_POSITION = (72, 56)
+BRAND_SIZE = (480, 140)
 
 
 def font(size, bold=False):
@@ -46,16 +46,24 @@ def render(only=None):
         canvas = background.convert("RGBA")
         canvas.alpha_composite(brand, BRAND_POSITION)
         draw = ImageDraw.Draw(canvas)
-        y = 308
+        y = 292
         for line in item["title"]:
-            assert draw.textbbox((0, 0), line, font=font(80, True))[2] <= 740, line
-            draw.text((72, y), line, font=font(80, True), fill="white", stroke_width=0)
-            y += 100
+            assert draw.textbbox((0, 0), line, font=font(96, True))[2] <= 760, line
+            draw.text((72, y), line, font=font(96, True), fill="white", stroke_width=0)
+            y += 116
         y += 28
-        for line in item["subtitle"]:
-            assert draw.textbbox((0, 0), line, font=font(38))[2] <= 740, line
-            draw.text((76, y), line, font=font(38), fill="#ddc6f4")
-            y += 52
+        for paragraph in item["subtitle"]:
+            lines = [""]
+            for word in paragraph.split():
+                candidate = (lines[-1] + " " + word).strip()
+                if font(48).getlength(candidate) > 700 and lines[-1]:
+                    lines.append(word)
+                else:
+                    lines[-1] = candidate
+            for line in lines:
+                assert draw.textbbox((0, 0), line, font=font(48))[2] <= 700, line
+                draw.text((76, y), line, font=font(48), fill="#ddc6f4")
+                y += 60
         assert y < 715
         out = ASSETS / item["file"]
         canvas.convert("RGB").save(out, optimize=True)
