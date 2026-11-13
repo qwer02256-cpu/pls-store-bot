@@ -210,7 +210,7 @@ class ProductArticleTests(unittest.IsolatedAsyncioTestCase):
             ]
             self.assertFalse(any(b.url == self.url for b in buttons))
             caption = render.call_args.args[1]
-            self.assertIn(f'<a href="{self.url}">📄 Статья</a>', caption)
+            self.assertIn(f'📄 Статья: <a href="{self.url}">жми</a>', caption)
             self.assertNotIn(f'Статья:\n{self.url}', caption)
 
     async def test_admin_article_link_rejects_invalid_url_without_saving(self):

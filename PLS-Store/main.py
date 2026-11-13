@@ -488,7 +488,8 @@ def build_product_caption(product, *, max_desc: int = 420, lang: str = "ru") -> 
     lines = [f"💎 <b>{name}</b>\n", f"<blockquote>{desc}</blockquote>\n"]
     if product.get("article_url"):
         label = {"ru": "📄 Статья", "en": "📄 Article", "uk": "📄 Стаття"}.get(lang, "📄 Статья")
-        lines.append(f'<a href="{html.escape(product["article_url"], quote=True)}">{label}</a>')
+        link_text = {"ru": "жми", "en": "click", "uk": "тисни"}.get(lang, "жми")
+        lines.append(f'{label}: <a href="{html.escape(product["article_url"], quote=True)}">{link_text}</a>')
     if product.get("video_url"):
         lines.append(f"🎥 {'Video review' if lang == 'en' else 'Видео-обзор'}: {html.escape(product['video_url'])}")
     lines.append(f"💰 {'Price' if lang == 'en' else 'Цена'}: <b>{price}</b>")
