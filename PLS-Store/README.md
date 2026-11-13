@@ -21,7 +21,7 @@ Telegram-магазин цифровых товаров на **aiogram 3** + **S
 
 ## Кошелёк для AutoStars
 
-Для AutoStars 2.5 используйте **Tonhub с фразой из 24 слов**.
+Для AutoStars 2.5.1 используйте **Tonhub с фразой из 24 слов**.
 Возвращено исходное подключение через `api.fragment-api.com`;
 поддержка 12 слов и отдельный провайдер Fragment API Space удалены.
 См. [подключение Tonhub и обновление с 2.4](docs/TONHUB_SETUP.md).
@@ -195,7 +195,7 @@ ID сохраняются в SQLite; при временной недоступ�
 по обычному эмодзи, назначенному при загрузке в @Stickers.
 
 Проверка модуля: из `PLS-Store` запустите
-`python -m unittest discover -s tests -v`.
+`pip install -r requirements-test.txt`, затем `python -m unittest discover -s tests -v`.
 
 ## Настройка оплаты Platega на BotHost
 

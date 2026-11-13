@@ -352,7 +352,7 @@ def _log(level: str, msg: str):
 # 2. МЕТАДАННЫЕ ПЛАГИНА И КОНСТАНТЫ
 # ========================================================================
 NAME        = "AutoStars"
-VERSION     = "2.5"
+VERSION     = "2.5.1"
 DESCRIPTION = "Плагин по продаже звезд."
 CREDITS     = "@uservkru"
 UUID        = "fa0c2f3a-7a85-4c09-a3b2-9f3a9b8f8a75"
@@ -696,34 +696,193 @@ def _order_stars(jwt: str, username: str, quantity: int, show_sender: bool = Fal
         _log("error", f"SEND exception: {e}")
         return {"ok": False, "status": 0, "text": str(e), "json": None}
 
-def _authenticate_fragment(api_key: str, phone_number: str, version: str, mnemonics: List[str], chat_id: Any = None) -> tuple[Optional[str], Optional[dict], int]:
-    proxies = _get_proxies_for_chat(chat_id)
+def _authenticate_fragment(
+    api_key: str,
+    phone_number: str,
+    version: str,
+    mnemonics: List[str],
+    chat_id: Any = None,
+) -> tuple[Optional[str], Optional[dict], int]:
+    # Only fixed codes leave this boundary: errors can echo credentials/seed.
     try:
-        payload = {"api_key": api_key, "phone_number": phone_number, "version": version, "mnemonics": mnemonics}
-        r = requests.post(FRAGMENT_AUTH_URL, json=payload,
-                          headers={"Content-Type": "application/json", "Accept": "application/json"}, timeout=40, proxies=proxies)
-        try: data = r.json()
-        except Exception: data = {"raw": r.text}
-        if r.status_code >= 400:
-            return None, data, r.status_code
-        token_candidates = []
-        if isinstance(data, dict):
-            for key in ("token","jwt","access","authorization","Authorization","auth","detail"):
-                val = data.get(key)
-                if isinstance(val, str) and len(val) > 10:
-                    token_candidates.append(val)
-            for subkey in ("data","result","payload"):
-                sub = data.get(subkey)
-                if isinstance(sub, dict):
-                    for key in ("token","jwt","access"):
-                        val = sub.get(key)
-                        if isinstance(val, str) and len(val) > 10:
-                            token_candidates.append(val)
-        jwt = token_candidates[0] if token_candidates else None
-        return jwt, data, r.status_code
-    except Exception as e:
-        logger.warning(f"Authenticate failed: {e}")
-        return None, {"error": str(e)}, 0
+        proxies = _get_proxies_for_chat(chat_id)
+        payload = {
+            "api_key": api_key,
+            "phone_number": phone_number,
+            "version": version,
+            "mnemonics": mnemonics,
+        }
+        response = requests.post(
+            FRAGMENT_AUTH_URL,
+            json=payload,
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
+            timeout=(8, 40),
+            proxies=proxies,
+            allow_redirects=False,
+        )
+        status = response.status_code
+        try:
+            data = response.json()
+        except Exception:
+            return None, {"code": "invalid_response"}, status
+        if not isinstance(data, dict):
+            return None, {"code": "invalid_response"}, status
+        limited, wait = _is_too_many_attempts(data)
+        if status == 429 or limited:
+            return None, {"code": "rate_limit", "wait": wait}, status
+        if 200 <= status < 300:
+            for node in [data] + [data.get(k) for k in ("data", "result", "payload")]:
+                if not isinstance(node, dict):
+                    continue
+                for key in (
+                    "token",
+                    "jwt",
+                    "access",
+                    "access_token",
+                    "authorization",
+                    "Authorization",
+                    "auth",
+                ):
+                    value = node.get(key)
+                    if isinstance(value, str):
+                        value = _re.sub(
+                            r"^(?:JWT|Bearer)\s+", "", value.strip(), flags=_re.I
+                        )
+                        if len(value) > 10 and not _re.search(r"\s", value):
+                            return value, {"code": "ok"}, status
+        # Read, but never display or log raw provider validation messages.
+        description = json.dumps(data, ensure_ascii=False).lower()
+        if status in (200, 202, 400) and any(
+            term in description
+            for term in (
+                "confirm",
+                "verification",
+                "подтверд",
+                "check telegram",
+                "login_required",
+            )
+        ):
+            return None, {"code": "confirmation_required"}, status
+        return None, {"code": "api_rejected"}, status
+    except requests.exceptions.ProxyError:
+        return None, {"code": "proxy_error"}, 0
+    except requests.exceptions.SSLError:
+        return None, {"code": "tls_error"}, 0
+    except requests.exceptions.Timeout:
+        return None, {"code": "timeout"}, 0
+    except requests.exceptions.ConnectionError:
+        return None, {"code": "connection_error"}, 0
+    except Exception:
+        logger.warning(
+            "AutoStars: authentication failed internally; credentials omitted"
+        )
+        return None, {"code": "internal_error"}, 0
+
+
+def _jwt_auth_keyboard():
+    kb = K()
+    kb.add(B("✅ Я подтвердил вход", callback_data=CBT_JWT_CONFIRMED))
+    kb.add(B("🔄 Повторить запрос", callback_data=CBT_JWT_RESEND))
+    kb.add(B("❌ Отмена", callback_data=CBT_FSM_CANCEL))
+    return kb
+
+
+def _run_fragment_auth(bot, chat_id):
+    state = _fsm.get(chat_id)
+    if not state:
+        bot.send_message(chat_id, "Настройка сброшена. Начните создание токена заново.")
+        return
+    if state.get("auth_busy"):
+        bot.send_message(chat_id, "Запрос уже выполняется. Дождитесь результата.")
+        return
+    if not (
+        state.get("api_key")
+        and state.get("phone")
+        and len(state.get("mnemonic") or []) == 24
+    ):
+        bot.send_message(chat_id, "Не хватает данных. Начните создание токена заново.")
+        return
+    state["auth_busy"] = True
+    try:
+        bot.send_message(
+            chat_id,
+            "⏳ 24 слова получены. Подключаюсь к Fragment API; подключение — до 8 секунд, ожидание ответа — до 40 секунд.",
+        )
+        jwt, raw, status = _authenticate_fragment(
+            api_key=state["api_key"],
+            phone_number=state["phone"],
+            version=state.get("wallet_version") or "W5",
+            mnemonics=state["mnemonic"],
+            chat_id=chat_id,
+        )
+        # Ignore a response after cancellation or restarting the setup.
+        if _fsm.get(chat_id) is not state:
+            return
+        if jwt:
+            _set_cfg(chat_id, fragment_jwt=jwt)
+            _fsm.pop(chat_id, None)
+            state.pop("mnemonic", None)
+            bot.send_message(
+                chat_id, "✅ Токен создан и привязан. Проверяю баланс кошелька…"
+            )
+            try:
+                version, balance, wallet = _check_fragment_wallet(jwt, chat_id=chat_id)
+                if version is not None or balance is not None or wallet is not None:
+                    _set_cfg(
+                        chat_id,
+                        wallet_version=version,
+                        balance_ton=(
+                            round(balance, 6)
+                            if isinstance(balance, (int, float))
+                            else None
+                        ),
+                        last_wallet_raw=wallet,
+                    )
+                    bot.send_message(
+                        chat_id,
+                        "✅ Проверка кошелька завершена. Откройте раздел «Токен» для просмотра баланса.",
+                    )
+                else:
+                    bot.send_message(
+                        chat_id,
+                        "Токен сохранён, но баланс получить не удалось. Проверьте соединение с API и кошелёк до включения продаж.",
+                    )
+            except Exception:
+                bot.send_message(
+                    chat_id,
+                    "Токен сохранён, но проверка кошелька завершилась ошибкой. Проверьте соединение до включения продаж.",
+                )
+            return
+        code = raw.get("code") if isinstance(raw, dict) else "internal_error"
+        messages = {
+            "timeout": "API не ответил вовремя. Проверьте доступность api.fragment-api.com с хостинга Cardinal и настройки прокси.",
+            "proxy_error": "Не удалось подключиться через прокси. Проверьте его адрес, доступ и настройки в разделе «Прокси».",
+            "tls_error": "Ошибка защищённого соединения TLS. Проверьте сертификаты и дату на хостинге. Не отключайте проверку сертификатов.",
+            "connection_error": "Нет соединения с Fragment API: возможен сбой DNS, блокировка или недоступность сервиса с хостинга. Работа сайта на телефоне не проверяет доступ с Cardinal.",
+            "internal_error": "Ошибка обработки авторизации в плагине. Проверьте настройки прокси и актуальность файла; секреты в поддержку не присылайте.",
+            "invalid_response": "API вернул неожиданный ответ. Проверьте адрес API и настройки прокси.",
+            "confirmation_required": "API просит подтверждение входа. Подтвердите его в Telegram и нажмите кнопку ниже.",
+            "api_rejected": f"API не выдал токен (HTTP {status}). Проверьте API-ключ, телефон, версию кошелька и доступ провайдера. Не меняйте слова и не добавляйте их.",
+        }
+        if code == "rate_limit":
+            wait = raw.get("wait")
+            message = f"Слишком много попыток. Подождите {wait if isinstance(wait, int) and wait > 0 else 'несколько'} секунд перед повтором."
+        else:
+            message = messages.get(code, messages["internal_error"])
+        bot.send_message(chat_id, "⚠️ " + message, reply_markup=_jwt_auth_keyboard())
+    except Exception:
+        logger.warning("AutoStars: auth handler failed; credentials omitted")
+        try:
+            bot.send_message(
+                chat_id,
+                "⚠️ Авторизация не завершена из-за внутренней ошибки. Повторите запрос кнопкой ниже или отмените настройку.",
+                reply_markup=_jwt_auth_keyboard(),
+            )
+        except Exception:
+            logger.warning("AutoStars: unable to deliver authentication result")
+    finally:
+        state.pop("auth_busy", None)
+
 
 def _is_too_many_attempts(raw_resp: Any) -> tuple[bool, Optional[int]]:
     text = ""
@@ -928,7 +1087,7 @@ def _about_text() -> str:
     return _pls_panel(
         "⭐ <b>AutoStars</b>\n"
         "Автоматическая продажа Telegram Stars\n\n"
-        f"📦 Версия: <code>{VERSION}</code> · PLS-LIC-2.5\n"
+        f"📦 Версия: <code>{VERSION}</code> · PLS-LIC-2.5.1\n"
         + (
             "🔑 Лицензия: временная работа до восстановления связи (до 12 часов)\n"
             if _PLS_MODE == "grace"
@@ -1945,23 +2104,17 @@ def _handle_fsm(message: Message, cardinal: Cardinal):
     if state.get("step") == "jwt_seed":
         if text.lower() in ("/cancel", "cancel", "отмена"):
             _fsm.pop(chat_id, None); cardinal.telegram.bot.send_message(chat_id, "❌ Отменено."); return
-        words = [w.strip() for w in text.replace("\n", " ").split(" ") if w.strip()]
-        if len(words) != 24:
-            cardinal.telegram.bot.send_message(chat_id, f"⚠️ Должно быть ровно 24 слова (сейчас {len(words)}). Повторите ввод или /cancel."); return
-        state["mnemonic"] = words; _fsm[chat_id] = state
+        if state.get("auth_busy"):
+            cardinal.telegram.bot.send_message(chat_id, "Запрос уже выполняется. Дождитесь результата.")
+            return
         try: cardinal.telegram.bot.delete_message(chat_id, message.message_id)
         except Exception: pass
-        api_key = state.get("api_key"); phone = state.get("phone"); wallet_ver = state.get("wallet_version") or "W5"
-        jwt, raw, sc = _authenticate_fragment(api_key=api_key, phone_number=phone, version=wallet_ver, mnemonics=words, chat_id=chat_id)
-        if jwt:
-            _set_cfg(chat_id, fragment_jwt=jwt); cardinal.telegram.bot.send_message(chat_id, "✅ Успешно: токен создан и привязан.")
-            ver, bal, resp = _check_fragment_wallet(jwt, chat_id=chat_id)
-            if ver is not None or bal is not None or resp is not None:
-                _set_cfg(chat_id, wallet_version=ver, balance_ton=(round(bal, 6) if isinstance(bal, (int, float)) else None), last_wallet_raw=resp)
-            _fsm.pop(chat_id, None); return
-        is_tma, wait_sec = _is_too_many_attempts(raw)
-        if sc == 400 and is_tma: cardinal.telegram.bot.send_message(chat_id, f"Подождите {wait_sec or 'несколько'} секунд, затем подтвредите вход и подождите ответа в плагине. ", parse_mode="HTML")
-        else: cardinal.telegram.bot.send_message(chat_id, f"Пока токен не выдан (статус {sc}). Подтвердите вход в Telegram и нажмите «Я подтвердил вход».", parse_mode="HTML")
+        words = text.lower().split()
+        if len(words) != 24:
+            cardinal.telegram.bot.send_message(chat_id, f"⚠️ Должно быть ровно 24 слова (сейчас {len(words)}). Повторите ввод или /cancel.")
+            return
+        state["mnemonic"] = words
+        _run_fragment_auth(cardinal.telegram.bot, chat_id)
         return
 
     if state.get("step") == "star_add_qty":
@@ -2058,52 +2211,18 @@ def _handle_fsm(message: Message, cardinal: Cardinal):
         return
 
 def _jwt_confirmed(bot, call):
-    chat_id = call.message.chat.id
-    state = _fsm.get(chat_id) or {}
-    api_key = state.get("api_key"); phone = state.get("phone"); wallet_ver = state.get("wallet_version") or "W5"; mnemonic = state.get("mnemonic")
-    try: bot.answer_callback_query(call.id)
-    except Exception: pass
-    if not (api_key and phone and wallet_ver and mnemonic):
-        bot.send_message(chat_id, "⚠️ Не хватает данных для создания токена. Попробуйте ещё раз."); _fsm.pop(chat_id, None); _open_token(bot, call); return
-    jwt, raw, sc = _authenticate_fragment(api_key=api_key, phone_number=phone, version=wallet_ver, mnemonics=mnemonic, chat_id=chat_id)
-    if jwt:
-        _set_cfg(chat_id, fragment_jwt=jwt); bot.send_message(chat_id, "✅ Успешно: токен создан и привязан.")
-        ver, bal, resp = _check_fragment_wallet(jwt, chat_id=chat_id)
-        if ver is not None or bal is not None or resp is not None:
-            _set_cfg(chat_id, wallet_version=ver, balance_ton=(round(bal, 6) if isinstance(bal, (int, float)) else None), last_wallet_raw=resp)
-        _fsm.pop(chat_id, None)
-    else:
-        is_tma, wait_sec = _is_too_many_attempts(raw)
-        if sc == 400 and is_tma:
-            bot.send_message(chat_id, f"Слишком много попыток входа. Подождите {wait_sec or 'несколько'} секунд и попробуйте ещё раз.")
-        else:
-            try: text = json.dumps(raw, ensure_ascii=False, indent=2)[:1900]
-            except Exception: text = str(raw)[:1900]
-            bot.send_message(chat_id, f"⚠️ Токен пока не выдан. Статус: <code>{sc}</code>\nОтвет сервера:\n<code>{text}</code>", parse_mode="HTML")
-    try: _open_token(bot, call)
-    except Exception: pass
+    try:
+        bot.answer_callback_query(call.id)
+    except Exception:
+        pass
+    _run_fragment_auth(bot, call.message.chat.id)
 
 def _jwt_resend(bot, call):
-    chat_id = call.message.chat.id
-    st = _fsm.get(chat_id) or {}
-    api_key = st.get("api_key"); phone = st.get("phone"); wallet_ver = st.get("wallet_version") or "W5"; words = st.get("mnemonic")
-    try: bot.answer_callback_query(call.id, "Отправляю запрос…")
-    except Exception: pass
-    if not (api_key and phone and words):
-        bot.send_message(chat_id, "Не хватает данных для повтора."); return
-    jwt, raw, sc = _authenticate_fragment(api_key=api_key, phone_number=phone, version=wallet_ver, mnemonics=words, chat_id=chat_id)
-    if jwt:
-        _set_cfg(chat_id, fragment_jwt=jwt); bot.send_message(chat_id, "✅ Успешно: токен создан и привязан.")
-        ver, bal, resp = _check_fragment_wallet(jwt, chat_id=chat_id)
-        if ver is not None or bal is not None or resp is not None:
-            _set_cfg(chat_id, wallet_version=ver, balance_ton=(round(bal, 6) if isinstance(bal, (int, float)) else None), last_wallet_raw=resp)
-        _fsm.pop(chat_id, None); _open_token(bot, call); return
-    is_tma, wait_sec = _is_too_many_attempts(raw)
-    if sc == 400 and is_tma: bot.send_message(chat_id, f"Слишком много попыток входа. Подождите {wait_sec or 'несколько'} секунд и попробуйте снова.")
-    else:
-        try: pretty = json.dumps(raw, ensure_ascii=False, indent=2)
-        except Exception: pretty = str(raw)
-        bot.send_message(chat_id, "Ответ сервера:\n<code>{}</code>".format(pretty[:1900]), parse_mode="HTML")
+    try:
+        bot.answer_callback_query(call.id)
+    except Exception:
+        pass
+    _run_fragment_auth(bot, call.message.chat.id)
 
 # ========================================================================
 # 8. ОБРАБОТЧИКИ СОБЫТИЙ FUNPAY (ЗАКАЗЫ, СООБЩЕНИЯ)
@@ -2428,7 +2547,7 @@ def init_cardinal(cardinal: Cardinal):
     except Exception:
         pass
 
-    logger.info(f"Загружен {NAME} v{VERSION} [PLS-LIC-2.5]. Продажа требует подтверждённой лицензии.")
+    logger.info(f"Загружен {NAME} v{VERSION} [PLS-LIC-2.5.1]. Продажа требует подтверждённой лицензии.")
     if not _pls_has_key():
         logger.warning("AutoStars: ключ не введён. Откройте /autostars в Telegram-боте Cardinal для активации.")
 
