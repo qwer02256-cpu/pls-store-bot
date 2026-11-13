@@ -184,6 +184,13 @@ def init_db() -> None:
             )
         """)
 
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS chat_screens (
+                chat_id INTEGER NOT NULL, message_id INTEGER NOT NULL,
+                PRIMARY KEY(chat_id,message_id)
+            )
+        """)
+
         # seed default design texts if missing
         defaults = {
             "welcome_text": "<b>PLS Store</b>\n🏠 <b>Главное меню</b>\n━━━━━━━━━━━━━━━━━━━━\n\n👋 С возвращением, <b>{first_name}</b>.\n💲 Баланс: <b>{balance}₽</b>\n\nПлагины для FunPayCardinal",

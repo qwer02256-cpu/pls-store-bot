@@ -12,6 +12,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, BufferedIn
 from config import ADMIN_ID, DB_PATH
 from services.db import db, ensure_user, get_user_language
 from services.licenses import owned, mutate, issue, audit
+from services.screens import screen_reply, screen_send
 
 router = Router()
 router.message.filter(F.chat.type == "private")
@@ -28,8 +29,16 @@ def keyboard(rows):
                     callback_data=d,
                     style=(
                         "danger"
-                        if d in ("profile", "home", "licenses")
-                        else "success" if d.startswith("lic:download:") else "primary"
+                        if d
+                        in ("profile", "home", "licenses", "adm:licenses", "adm:home")
+                        or d.startswith(
+                            ("admlic:block:", "admlic:reset:", "admlic:do_reset:")
+                        )
+                        else (
+                            "success"
+                            if d.startswith(("lic:download:", "admlic:unblock:"))
+                            else "primary"
+                        )
                     ),
                 )
                 for t, d in r
@@ -58,14 +67,15 @@ async def deliver(bot, lid, uid):
     with db() as conn:
         data = asset(conn, row["product_id"])
     if not data:
-        await bot.send_message(
-            uid, "Файл готовится продавцом. Лицензия сохранена в «Лицензии»."
+        await screen_send(
+            bot, uid, "Файл готовится продавцом. Лицензия сохранена в «Лицензии»."
         )
         return False
     from services.license_files import plugin_bytes
 
     filename, content = plugin_bytes(data["file_path"])
-    await bot.send_message(
+    await screen_send(
+        bot,
         uid,
         f"🔑 Бессрочная лицензия #{lid}\nКлюч: <code>{html.escape(row['license_key'])}</code>\nПривязка к FunPay при первом запуске.",
         reply_markup=keyboard([[("Лицензии", "licenses")]]),
@@ -120,7 +130,7 @@ async def cmd_licenses(message):
     await show_list(message, message.from_user.id)
 
 
-async def show_list(message, uid, page=0):
+async def show_list(target, uid, page=0):
     with db() as conn:
         rows = conn.execute(
             "SELECT id,status FROM licenses WHERE user_id=? ORDER BY id DESC LIMIT 21 OFFSET ?",
@@ -133,7 +143,8 @@ async def show_list(message, uid, page=0):
         buttons.append([("←", f"licenses:page:{page-1}")])
     if len(rows) > 20:
         buttons.append([("→", f"licenses:page:{page+1}")])
-    await message.answer(
+    await screen_reply(
+        target,
         f"<b>PLS Store</b>\n{title(uid)}\n━━━━━━━━━━━━━━━━━━━━\n\n"
         + ("Выберите лицензию." if rows else "Пока нет лицензий."),
         reply_markup=keyboard(
@@ -160,13 +171,13 @@ async def license_page(call):
     except ValueError:
         return
     if 0 <= page < 100000:
-        await show_list(call.message, call.from_user.id, page)
+        await show_list(call, call.from_user.id, page)
 
 
 @router.callback_query(F.data == "licenses")
 async def list_licenses(call):
     await call.answer()
-    await show_list(call.message, call.from_user.id)
+    await show_list(call, call.from_user.id)
 
 
 @router.callback_query(F.data.startswith("lic:"))
@@ -184,9 +195,10 @@ async def license_action(call, bot):
     await call.answer()
     if action == "request":
         changed = mutate(lid, "request", call.from_user.id, owner=call.from_user.id)
-        await call.message.answer("Запрос сохранён. Дождитесь решения администратора.")
+        await screen_reply(call, "Запрос сохранён. Дождитесь решения администратора.")
         if changed and ADMIN_ID:
-            await bot.send_message(
+            await screen_send(
+                bot,
                 ADMIN_ID,
                 f"Запрос смены привязки #{lid}, покупатель {call.from_user.id}. /license {lid}",
             )
@@ -196,8 +208,9 @@ async def license_action(call, bot):
         except (ValueError, OSError, SyntaxError, UnicodeError):
             success = False
         if not success:
-            await call.message.answer(
-                "Файл недоступен: лицензия заблокирована или файл ещё не загружен. Обратитесь в поддержку."
+            await screen_reply(
+                call,
+                "Файл недоступен: лицензия заблокирована или файл ещё не загружен. Обратитесь в поддержку.",
             )
     elif action == "guide":
         with db() as conn:
@@ -207,9 +220,10 @@ async def license_action(call, bot):
                 BufferedInputFile(data["instruction"].encode(), filename="INSTALL.txt")
             )
         else:
-            await call.message.answer("Инструкция ещё не загружена продавцом.")
+            await screen_reply(call, "Инструкция ещё не загружена продавцом.")
     else:
-        await call.message.answer(
+        await screen_reply(
+            call,
             f"🔑 #{lid} · бессрочно\nСтатус: {row['status']}\nFunPay ID: {row['funpay_id'] or 'не привязан'}\nЗапрос смены: {'да' if row['rebind_requested'] else 'нет'}\nКлюч: <code>{html.escape(row['license_key'])}</code>",
             reply_markup=keyboard(
                 [
@@ -235,13 +249,124 @@ ADMIN_HELP = """🔑 Управление лицензиями
 Список товаров: /admin → Товары. Сброс разрешает привязать ключ к другому FunPay при следующем запуске."""
 
 
+def admin_license_buttons(rows):
+    return [
+        [
+            (
+                f"Лицензия #{r['id']} · FunPay {r['funpay_id'] or '—'}",
+                f"admlic:view:{r['id']}",
+            )
+        ]
+        for r in rows
+    ]
+
+
+async def admin_license_card(target, lid, note=""):
+    with db() as conn:
+        row = conn.execute("SELECT * FROM licenses WHERE id=?", (lid,)).fetchone()
+    if not row:
+        await screen_reply(
+            target,
+            "Лицензия не найдена",
+            reply_markup=keyboard([[("← Лицензии", "adm:licenses")]]),
+        )
+        return
+    toggle = (
+        ("Заблокировать", f"admlic:block:{lid}")
+        if row["status"] == "active"
+        else ("Разблокировать", f"admlic:unblock:{lid}")
+    )
+    await screen_reply(
+        target,
+        f"🔑 <b>Лицензия #{lid}</b>\n\nСтатус: {row['status']}\nПокупатель Telegram ID: {row['user_id']}\n"
+        f"Товар: #{row['product_id']}\nFunPay ID: {row['funpay_id'] or 'не привязан'}\nЗапрос смены: {'да' if row['rebind_requested'] else 'нет'}"
+        + ("\n\n" + html.escape(note) if note else ""),
+        reply_markup=keyboard(
+            [
+                [toggle],
+                [("Сбросить FunPay", f"admlic:reset:{lid}")],
+                [("Журнал", f"admlic:log:{lid}")],
+                [("← Лицензии", "adm:licenses")],
+            ]
+        ),
+    )
+
+
 @router.callback_query(F.data == "adm:licenses")
 async def admin_menu(call):
     if call.from_user.id != ADMIN_ID:
         await call.answer()
         return
     await call.answer()
-    await call.message.answer(ADMIN_HELP)
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM licenses ORDER BY rebind_requested DESC,id DESC LIMIT 20"
+        ).fetchall()
+    await screen_reply(
+        call,
+        ADMIN_HELP,
+        reply_markup=keyboard(
+            admin_license_buttons(rows) + [[("← Админ-панель", "adm:home")]]
+        ),
+    )
+
+
+@router.callback_query(F.data.startswith("admlic:"))
+async def admin_license_callback(call):
+    if call.from_user.id != ADMIN_ID:
+        await call.answer("Нет доступа", show_alert=True)
+        return
+    try:
+        _, action, raw = call.data.split(":")
+        lid = int(raw)
+    except (ValueError, TypeError):
+        await call.answer("Неверный номер лицензии", show_alert=True)
+        return
+    await call.answer()
+    if action == "reset":
+        with db() as conn:
+            row = conn.execute("SELECT * FROM licenses WHERE id=?", (lid,)).fetchone()
+        if not row:
+            await admin_license_card(call, lid)
+            return
+        await screen_reply(
+            call,
+            f"Сбросить привязку лицензии <b>#{lid}</b> к FunPay <b>{row['funpay_id'] or '—'}</b>?\nСначала остановите старую копию Cardinal: следующий успешный запрос привяжет ключ заново.",
+            reply_markup=keyboard(
+                [
+                    [("Да, сбросить", f"admlic:do_reset:{lid}")],
+                    [("Отмена", f"admlic:view:{lid}")],
+                ]
+            ),
+        )
+        return
+    if action in ("block", "unblock", "do_reset"):
+        try:
+            mutate(lid, "reset" if action == "do_reset" else action, ADMIN_ID)
+        except ValueError:
+            await admin_license_card(call, lid)
+            return
+        note = (
+            "Привязка FunPay сброшена." if action == "do_reset" else "Статус изменён."
+        )
+        await admin_license_card(call, lid, note)
+        return
+    if action == "log":
+        with db() as conn:
+            rows = conn.execute(
+                "SELECT * FROM license_audit WHERE license_id=? ORDER BY id DESC LIMIT 25",
+                (lid,),
+            ).fetchall()
+        text = "\n".join(
+            f"{r['created_at']} · {r['actor']}: {r['action']}" for r in rows
+        )
+        await screen_reply(
+            call,
+            html.escape(text) or "Журнал пуст",
+            reply_markup=keyboard([[("← Лицензия", f"admlic:view:{lid}")]]),
+        )
+        return
+    await admin_license_card(call, lid)
 
 
 @router.message(Command("license"))
@@ -264,7 +389,13 @@ async def search(message):
         f"#{r['id']} · TG {r['user_id']} · товар {r['product_id']} · {r['status']} · FP {r['funpay_id'] or '—'} · запрос {r['rebind_requested']}"
         for r in rows
     )
-    await message.answer(text or "Не найдено")
+    await screen_reply(
+        message,
+        text or "Не найдено",
+        reply_markup=keyboard(
+            admin_license_buttons(rows) + [[("← Лицензии", "adm:licenses")]]
+        ),
+    )
 
 
 @router.message(Command("license_issue"))
@@ -284,17 +415,21 @@ async def manual_issue(message, bot):
         with db() as conn:
             lid = issue(conn, uid, pid, actor=ADMIN_ID)
     except ValueError:
-        await message.answer(
-            "Формат: /license_issue TELEGRAM_ID PRODUCT_ID (существующий товар)"
+        await screen_reply(
+            message,
+            "Формат: /license_issue TELEGRAM_ID PRODUCT_ID (существующий товар)",
         )
         return
-    await message.answer(f"Выдана лицензия #{lid}")
+    await screen_reply(message, f"Выдана лицензия #{lid}")
     try:
         await deliver(bot, lid, uid)
     except Exception:
-        await message.answer(
-            "Лицензия создана, отправка будет повторена автоматически."
+        await screen_reply(
+            message, "Лицензия создана, отправка будет повторена автоматически."
         )
+
+
+ADMIN_ACTION_USAGE = "Укажите номер лицензии, а не FunPay ID. Например: <code>/license_action 1 reset</code>\nДействия: block — блокировка, unblock — разблокировка, reset — сброс FunPay.\nДля поиска: <code>/license FUNPAY_ID</code> или /admin → Лицензии."
 
 
 @router.message(Command("license_action"))
@@ -302,14 +437,31 @@ async def admin_action(message):
     if message.from_user.id != ADMIN_ID:
         return
     try:
-        _, lid, action = message.text.split()
-        if action not in ("block", "unblock", "reset"):
+        _, raw, action = message.text.split()
+        lid = int(raw)
+        if lid <= 0 or action not in ("block", "unblock", "reset"):
             raise ValueError()
-        mutate(int(lid), action, ADMIN_ID)
     except ValueError:
-        await message.answer("Формат: /license_action ID block|unblock|reset")
+        await screen_reply(message, ADMIN_ACTION_USAGE)
         return
-    await message.answer("Изменение сохранено")
+    try:
+        mutate(lid, action, ADMIN_ID)
+    except ValueError:
+        await screen_reply(
+            message, f"Лицензия <b>#{lid}</b> не найдена.\n\n" + ADMIN_ACTION_USAGE
+        )
+        return
+    await admin_license_card(
+        message,
+        lid,
+        "Привязка FunPay сброшена." if action == "reset" else "Статус изменён.",
+    )
+
+
+@router.message(F.text.regexp(r"^/license_action[^\s@]"))
+async def malformed_admin_action(message):
+    if message.from_user.id == ADMIN_ID:
+        await screen_reply(message, ADMIN_ACTION_USAGE)
 
 
 @router.message(Command("license_log"))
@@ -327,14 +479,15 @@ async def logs(message):
             ).fetchall()
     except ValueError:
         return
-    await message.answer(
+    await screen_reply(
+        message,
         html.escape(
             "\n".join(
                 f"{r['created_at']} #{r['license_id']} {r['actor']}: {r['action']}"
                 for r in rows
             )
         )
-        or "Журнал пуст"
+        or "Журнал пуст",
     )
 
 
@@ -353,16 +506,19 @@ async def start_upload(message, state: FSMContext):
             if not conn.execute("SELECT 1 FROM products WHERE id=?", (pid,)).fetchone():
                 raise ValueError()
     except ValueError:
-        await message.answer("Укажите существующий PRODUCT_ID")
+        await screen_reply(message, "Укажите существующий PRODUCT_ID")
         return
     await state.set_state(Upload.content)
     await state.update_data(
         pid=pid, kind="file" if command.split("@")[0] == "/license_file" else "guide"
     )
-    await message.answer(
-        "Отправьте .py файл плагина (для AutoStars — AutoStars.py)."
-        if "file" in command
-        else "Отправьте подробную инструкцию текстом или .txt (до 100 КБ)."
+    await screen_reply(
+        message,
+        (
+            "Отправьте .py файл плагина (для AutoStars — AutoStars.py)."
+            if "file" in command
+            else "Отправьте подробную инструкцию текстом или .txt (до 100 КБ)."
+        ),
     )
 
 
@@ -372,19 +528,19 @@ async def upload(message, state: FSMContext, bot):
         return
     if message.text == "/cancel":
         await state.clear()
-        await message.answer("Отменено")
+        await screen_reply(message, "Отменено")
         return
     data = await state.get_data()
     pid = data["pid"]
     kind = data["kind"]
     doc = message.document
     if kind == "file" and (not doc or not (doc.file_name or "").endswith(".py")):
-        await message.answer("Нужен файл .py")
+        await screen_reply(message, "Нужен файл .py")
         return
     if doc and (
         not doc.file_size or doc.file_size > (2_000_000 if kind == "file" else 100_000)
     ):
-        await message.answer("Файл слишком большой")
+        await screen_reply(message, "Файл слишком большой")
         return
     if kind == "file":
         import secrets
@@ -410,8 +566,9 @@ async def upload(message, state: FSMContext, bot):
                 raise ValueError("AutoStars без проверки лицензии")
         except (ValueError, SyntaxError, UnicodeError):
             target.unlink(missing_ok=True)
-            await message.answer(
-                "Файл отклонён: ошибка Python/UTF-8 или отсутствует проверка лицензии AutoStars."
+            await screen_reply(
+                message,
+                "Файл отклонён: ошибка Python/UTF-8 или отсутствует проверка лицензии AutoStars.",
             )
             return
         value = str(target.resolve())
@@ -423,12 +580,12 @@ async def upload(message, state: FSMContext, bot):
                 else (message.text or "")
             )
         except UnicodeError:
-            await message.answer("Нужен UTF-8 текст")
+            await screen_reply(message, "Нужен UTF-8 текст")
             return
         if not value.strip():
             return
         if len(value.encode("utf-8")) > 100_000:
-            await message.answer("Инструкция слишком большая")
+            await screen_reply(message, "Инструкция слишком большая")
             return
     with db() as conn:
         old = asset(conn, pid)
@@ -440,4 +597,4 @@ async def upload(message, state: FSMContext, bot):
         )
         audit(conn, None, ADMIN_ID, f"asset:{pid}:{kind}")
     await state.clear()
-    await message.answer("Сохранено. Для продажи нужны и файл, и инструкция.")
+    await screen_reply(message, "Сохранено. Для продажи нужны и файл, и инструкция.")

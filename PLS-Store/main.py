@@ -73,6 +73,7 @@ from services.platega import PlategaClient, PlategaError
 from services.emoji import PackEmojiMiddleware
 from services.payment_ledger import settle_payment, money
 from services.checkout import prepare_checkout, balance_checkout
+from services.screens import screen_reply, screen_send
 from services.checkout_ui import quote_text, receipt_text, credit_text
 from services.payment_monitor import monitor_payments
 from services.payment_options import METHOD_FEES, method_info
@@ -466,38 +467,8 @@ def banner_path(key: str, lang: str = "ru") -> Path | None:
 
 
 async def safe_edit_or_send(target, text: str, reply_markup=None, photo: Path | None = None):
-    """Update callback screens in place to avoid Telegram's deletion animation."""
-    message = target if isinstance(target, Message) else target.message
-    if photo and photo.is_file() and len(text) > 1024:
-        # Long purchase histories exceed Telegram's photo-caption limit.
-        await message.answer_photo(photo=FSInputFile(photo))
-        await message.answer(text, reply_markup=reply_markup, link_preview_options=NO_PREVIEW)
-        return
-    if not isinstance(target, Message):
-        try:
-            if photo and photo.is_file():
-                await message.edit_media(
-                    media=InputMediaPhoto(media=FSInputFile(photo), caption=text),
-                    reply_markup=reply_markup,
-                )
-            elif message.photo and len(text) <= 1024:
-                # Keep the current banner for text-only subsections.
-                await message.edit_caption(caption=text, reply_markup=reply_markup)
-            elif not message.photo:
-                await message.edit_text(text, reply_markup=reply_markup, link_preview_options=NO_PREVIEW)
-            else:
-                # Telegram cannot turn a photo message into a text message.
-                await message.answer(text, reply_markup=reply_markup, link_preview_options=NO_PREVIEW)
-                await message.edit_reply_markup(reply_markup=None)
-            return
-        except TelegramBadRequest as exc:
-            if "message is not modified" in exc.message.lower():
-                return
-            # Old or otherwise uneditable messages can still open a fresh screen.
-    if photo and photo.is_file():
-        await message.answer_photo(photo=FSInputFile(photo), caption=text, reply_markup=reply_markup)
-    else:
-        await message.answer(text, reply_markup=reply_markup, link_preview_options=NO_PREVIEW)
+    """Replace the previous screen and remove stale navigation messages."""
+    return await screen_reply(target,text,reply_markup=reply_markup,photo=photo)
 
 
 def build_product_caption(product, *, max_desc: int = 420, lang: str = "ru") -> str:
@@ -670,8 +641,10 @@ async def cmd_start(message: Message):
 
 
 @dp.callback_query(F.data == "home")
-async def cb_home(callback: CallbackQuery):
+async def cb_home(callback: CallbackQuery, state: FSMContext | None = None):
     await callback.answer()
+    if state is not None:
+        await state.clear()
     if not has_accepted_license(callback.from_user.id):
         await show_license_gate(callback, callback.from_user.id)
         return
@@ -762,7 +735,7 @@ async def begin_product_checkout(message, user, product, bot, token=None):
         prepare_checkout(user.id, product["id"], token)
         quote = balance_checkout(user.id, token)
     except ValueError:
-        await message.answer(
+        await screen_reply(message,
             {
                 "ru": "Товар недоступен или ещё не готов к автоматической выдаче. Откройте карточку товара заново.",
                 "uk": "Товар недоступний або ще не готовий до автоматичної видачі. Відкрийте картку товару знову.",
@@ -774,7 +747,7 @@ async def begin_product_checkout(message, user, product, bot, token=None):
         if quote["result"] is not None:
             await notify_purchase(quote["result"], bot)
         else:
-            await message.answer(
+            await screen_reply(message,
                 {
                     "ru": "Эта покупка уже оплачена. Файл и ключ — в разделе «Лицензии».",
                     "uk": "Цю покупку вже оплачено. Файл і ключ — у розділі «Ліцензії».",
@@ -805,7 +778,7 @@ async def cb_buy_balance(callback: CallbackQuery, bot: Bot):
         return
     product = get_product(product_id)
     if not product or not product.get("active", 1):
-        await callback.message.answer(tr(callback.from_user.id, "unavailable"))
+        await screen_reply(callback,tr(callback.from_user.id, "unavailable"))
         return
     quote = await begin_product_checkout(
         callback.message, callback.from_user, product, bot, token
@@ -848,12 +821,12 @@ async def cb_purchase_method(callback: CallbackQuery, bot: Bot):
         return
     product = get_product(product_id)
     if not product or not product.get("active", 1):
-        await callback.message.answer(tr(callback.from_user.id, "unavailable"))
+        await screen_reply(callback,tr(callback.from_user.id, "unavailable"))
         return
     try:
         price = money(parse_price_rub(product["price"], product))
     except ValueError:
-        await callback.message.answer(tr(callback.from_user.id, "unavailable"))
+        await screen_reply(callback,tr(callback.from_user.id, "unavailable"))
         return
     await create_payment_invoice(callback.message, callback.from_user, price, bot,
                                  payment_method=method, product=product, checkout_id=token)
@@ -913,7 +886,7 @@ async def cb_api_info(callback: CallbackQuery):
 async def cb_promo(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     await state.set_state(ProductWizard.promo_create)  # reuse for input
-    await callback.message.answer(
+    await screen_reply(callback,
         tr(callback.from_user.id, "promo_enter"),
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="⬅️ Отмена", callback_data="profile")]
@@ -930,17 +903,17 @@ async def promo_apply(message: Message, state: FSMContext):
             "SELECT * FROM promos WHERE upper(code)=? AND active=1", (code,)
         ).fetchone()
         if not promo:
-            await message.answer(tr(message.from_user.id, "promo_bad"), reply_markup=back_kb("profile", get_user_language(message.from_user.id)))
+            await screen_reply(message,tr(message.from_user.id, "promo_bad"), reply_markup=back_kb("profile", get_user_language(message.from_user.id)))
             return
         used = conn.execute(
             "SELECT 1 FROM promo_uses WHERE promo_id=? AND user_id=?",
             (promo["id"], message.from_user.id),
         ).fetchone()
         if used:
-            await message.answer(tr(message.from_user.id, "promo_used"), reply_markup=back_kb("profile", get_user_language(message.from_user.id)))
+            await screen_reply(message,tr(message.from_user.id, "promo_used"), reply_markup=back_kb("profile", get_user_language(message.from_user.id)))
             return
         if promo["max_uses"] is not None and promo["used_count"] >= promo["max_uses"]:
-            await message.answer(tr(message.from_user.id, "promo_limit"), reply_markup=back_kb("profile", get_user_language(message.from_user.id)))
+            await screen_reply(message,tr(message.from_user.id, "promo_limit"), reply_markup=back_kb("profile", get_user_language(message.from_user.id)))
             return
         # apply
         if promo["discount_type"] == "fixed":
@@ -957,7 +930,7 @@ async def promo_apply(message: Message, state: FSMContext):
             "UPDATE promos SET used_count = used_count + 1 WHERE id=?",
             (promo["id"],),
         )
-    await message.answer(
+    await screen_reply(message,
         tr(message.from_user.id, "promo_ok", bonus=bonus),
         reply_markup=back_kb("profile"),
     )
@@ -1000,7 +973,7 @@ async def cb_topup_amount(callback: CallbackQuery, state: FSMContext, bot: Bot):
     part = callback.data.split(":", 1)[1]
     if part == "custom":
         await state.set_state(ProductWizard.topup_custom)
-        await callback.message.answer(
+        await screen_reply(callback,
             tr(callback.from_user.id, "topup_custom", minimum=get_setting('min_topup', '1'))
         )
         return
@@ -1017,7 +990,7 @@ async def topup_custom_msg(message: Message, state: FSMContext, bot: Bot):
     try:
         amount = money((message.text or "").replace(",", ".").strip())
     except ValueError:
-        await message.answer(tr(message.from_user.id, "number"))
+        await screen_reply(message,tr(message.from_user.id, "number"))
         return
     if await show_payment_methods(message, message.from_user, amount):
         await state.clear()
@@ -1029,11 +1002,11 @@ async def show_payment_methods(target, user, amount):
         minimum = money(get_setting("min_topup", "1"))
     except ValueError:
         message = target if isinstance(target, Message) else target.message
-        await message.answer(tr(user.id, "number"))
+        await screen_reply(message,tr(user.id, "number"))
         return False
     if amount < minimum:
         message = target if isinstance(target, Message) else target.message
-        await message.answer(tr(user.id, "minimum", amount=float(minimum)))
+        await screen_reply(message,tr(user.id, "minimum", amount=float(minimum)))
         return False
     lang = get_user_language(user.id)
     await safe_edit_or_send(target, tr(user.id, "payment_method_choose", amount=amount),
@@ -1062,16 +1035,16 @@ async def create_topup(message: Message, user, amount: float, bot: Bot, payment_
 
 async def create_payment_invoice(message: Message, user, amount, bot: Bot, payment_method: int = 2, product=None, checkout_id=None):
     if payment_method not in METHOD_FEES:
-        await message.answer(tr(user.id, "payment_method_invalid"))
+        await screen_reply(message,tr(user.id, "payment_method_invalid"))
         return
     try:
         amount = float(money(amount))
         minimum = money(get_setting("min_topup", "1")) if product is None else money("0.01")
     except ValueError:
-        await message.answer(tr(user.id, "number"))
+        await screen_reply(message,tr(user.id, "number"))
         return
     if amount < minimum:
-        await message.answer(tr(user.id, "minimum", amount=float(minimum)))
+        await screen_reply(message,tr(user.id, "minimum", amount=float(minimum)))
         return
     quote=None
     if product is not None:
@@ -1083,7 +1056,7 @@ async def create_payment_invoice(message: Message, user, amount, bot: Bot, payme
         checkout_id=checkout['id']
     ensure_user(user.id, user.username, user.first_name)
     if not platega:
-        await message.answer(
+        await screen_reply(message,
             tr(user.id, "payment_unavailable")
         )
         return
@@ -1108,7 +1081,7 @@ async def create_payment_invoice(message: Message, user, amount, bot: Bot, payme
         )
     except PlategaError as e:
         log.exception("create payment failed")
-        await message.answer(tr(user.id, "payment_error", error=e))
+        await screen_reply(message,tr(user.id, "payment_error", error=e))
         return
 
     tx_id = data.get("transactionId") or data.get("id")
@@ -1120,7 +1093,7 @@ async def create_payment_invoice(message: Message, user, amount, bot: Bot, payme
         valid_url = False
     if not tx_id or len(str(tx_id).encode()) > 54 or not valid_url:
         log.error("Platega payment response has no valid transaction ID or payment URL")
-        await message.answer(tr(user.id, "payment_error", error="Некорректный ответ платёжной системы"))
+        await screen_reply(message,tr(user.id, "payment_error", error="Некорректный ответ платёжной системы"))
         return
     tx_id = str(tx_id)
     with db() as conn:
@@ -1146,7 +1119,7 @@ async def create_payment_invoice(message: Message, user, amount, bot: Bot, payme
     if product is not None:
         invoice_text = quote_text(get_user_language(user.id),product["name"],quote["checkout"]["price"],quote["balance_part"],amount,tx_id)
         fee_text = tr(user.id, "purchase_fee_details", method=label, fee=fee)
-    await message.answer(
+    await screen_reply(message,
         invoice_text + "\n\n" + fee_text,
         reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
     )
@@ -1160,18 +1133,18 @@ async def cb_pay_status(callback: CallbackQuery, bot: Bot):
         owned = conn.execute("SELECT id, amount, currency FROM payments WHERE platega_id=? AND user_id=?",
                              (tx_id, callback.from_user.id)).fetchone()
     if not owned:
-        await callback.message.answer("Платёж не найден.")
+        await screen_reply(callback,"Платёж не найден.")
         return
     if not platega:
-        await callback.message.answer(tr(callback.from_user.id, "payment_unavailable"))
+        await screen_reply(callback,tr(callback.from_user.id, "payment_unavailable"))
         return
     try:
         data = await platega.get_status(tx_id)
     except PlategaError as e:
-        await callback.message.answer(f"Ошибка: {e}")
+        await screen_reply(callback,f"Ошибка: {e}")
         return
     status = (data.get("status") or "").upper()
-    await callback.message.answer(tr(callback.from_user.id, "status", tx_id=tx_id, status=status))
+    await screen_reply(callback,tr(callback.from_user.id, "status", tx_id=tx_id, status=status))
     if status == "CONFIRMED":
         try:
             await process_confirmed_payment(tx_id, data, bot)
@@ -1184,7 +1157,7 @@ async def cb_pay_status(callback: CallbackQuery, bot: Bot):
                 str(exc), tx_id, owned["amount"], owned["currency"], provider_id,
                 details.get("amount"), details.get("currency"),
             )
-            await callback.message.answer("Оплата подтверждена Platega, но обработка платежа пока не завершена. Повторно оплачивать счёт не нужно.")
+            await screen_reply(callback,"Оплата подтверждена Platega, но обработка платежа пока не завершена. Повторно оплачивать счёт не нужно.")
             if is_admin(callback.from_user.id):
                 diagnostic = (
                     f"Причина: {exc}\n"
@@ -1192,7 +1165,7 @@ async def cb_pay_status(callback: CallbackQuery, bot: Bot):
                     f"Ответ Platega: {details.get('amount')} {details.get('currency')}\n"
                     f"ID в ответе: {provider_id}"
                 )
-                await callback.message.answer(f"<pre>{html.escape(diagnostic)}</pre>")
+                await screen_reply(callback,f"<pre>{html.escape(diagnostic)}</pre>")
 
 
 async def notify_purchase(result, bot):
@@ -1208,7 +1181,7 @@ async def notify_purchase(result, bot):
         except Exception as exc:
             log.warning("License delivery pending: %s", type(exc).__name__)
     try:
-        await bot.send_message(
+        await screen_send(bot,
             user_id,
             tr(
                 user_id,
@@ -1247,7 +1220,7 @@ async def notify_purchase(result, bot):
         log.warning("Purchase recorded but buyer notification failed")
     if ADMIN_ID:
         try:
-            await bot.send_message(
+            await screen_send(bot,
                 ADMIN_ID,
                 f"✅ <b>Оплачена покупка #{result['purchase_id']}</b>\n"
                 f"Товар: {safe_stored_html(result['product_name'])}\n"
@@ -1271,7 +1244,7 @@ async def process_confirmed_payment(tx_id: str, data: dict, bot: Bot) -> bool:
         text=credit_text(lang,amount,result['balance'],result['credit_reason'],result['remaining'])
         callback=(f"buyproduct:{result['product_id']}:{result['checkout_id']}" if result['checkout_id'] else f"product:{result['product_id']}")
         try:
-            await bot.send_message(user_id,text,reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            await screen_send(bot,user_id,text,reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 *([[InlineKeyboardButton(text={'ru':'Продолжить покупку','uk':'Продовжити покупку','en':'Continue purchase'}[lang],callback_data=callback)]] if result['credit_reason']=='balance_changed' else []),
                 [InlineKeyboardButton(text={'ru':'Лицензии','uk':'Ліцензії','en':'Licenses'}[lang],callback_data='licenses')],
             ]))
@@ -1280,7 +1253,7 @@ async def process_confirmed_payment(tx_id: str, data: dict, bot: Bot) -> bool:
         return True
     new_bal = result["balance"]
     try:
-        await bot.send_message(
+        await screen_send(bot,
             user_id,
             (f"✅ Balance topped up by <b>{amount:.2f}₽</b>.\nCurrent balance: <b>{new_bal:.2f}₽</b>" if get_user_language(user_id) == "en" else f"✅ Баланс пополнен на <b>{amount:.2f}₽</b>.\nТекущий баланс: <b>{new_bal:.2f}₽</b>"),
         )
@@ -1288,7 +1261,7 @@ async def process_confirmed_payment(tx_id: str, data: dict, bot: Bot) -> bool:
         log.warning("Top-up credited but user notification failed")
     if result["referral_bonus"] > 0:
         try:
-            await bot.send_message(result["referrer_id"],
+            await screen_send(bot,result["referrer_id"],
                 f"🎁 Реферальный бонус +{result['referral_bonus']:.2f}₽ (пополнение пользователя {user_id})")
         except Exception:
             log.warning("Referral credited but notification failed")
@@ -1423,23 +1396,23 @@ async def cmd_sync_emojis(message: Message, bot: Bot):
         return
     middleware = next((item for item in bot.session.middleware if isinstance(item, PackEmojiMiddleware)), None)
     if middleware is None:
-        await message.answer("Модуль эмодзи не подключён. Перезапустите бота.")
+        await screen_reply(message,"Модуль эмодзи не подключён. Перезапустите бота.")
         return
     try:
         count = await middleware.refresh(bot)
     except Exception as exc:
         log.warning("Emoji refresh failed: %s", type(exc).__name__)
-        await message.answer("Не удалось загрузить набор эмодзи. Проверьте CUSTOM_EMOJI_PACKS и доступ бота к Telegram.")
+        await screen_reply(message,"Не удалось загрузить набор эмодзи. Проверьте CUSTOM_EMOJI_PACKS и доступ бота к Telegram.")
         return
     wave_status = "Анимированная ладонь подключена." if middleware.emoji_id("👋") else "Ладонь 👋 в наборе пока не найдена."
-    await message.answer(f"✅ Набор обновлён: {count} эмодзи.\n{wave_status}\nОткройте главное меню заново.")
+    await screen_reply(message,f"✅ Набор обновлён: {count} эмодзи.\n{wave_status}\nОткройте главное меню заново.")
 
 
 @dp.message(Command("admin"))
 async def cmd_admin(message: Message):
     if not is_admin(message.from_user.id):
         return
-    await message.answer("🛠 <b>Админ-панель PLS Store</b>", reply_markup=admin_home_keyboard())
+    await screen_reply(message,"🛠 <b>Админ-панель PLS Store</b>", reply_markup=admin_home_keyboard())
 
 
 @dp.callback_query(F.data == "adm:home")
@@ -1508,7 +1481,7 @@ async def adm_design_edit(callback: CallbackQuery, state: FSMContext):
     if key.startswith("document_") and key.endswith("_url"):
         current = current or DEFAULT_URLS.get(key[len("document_"):-len("_url")], "")
     await callback.answer()
-    await callback.message.answer(
+    await screen_reply(callback,
         (f"Текущее значение <code>{key}</code>:\n\n{html.escape(current)}\n\n"
          "Отправьте текст сообщением. Для кнопок можно добавить Premium Emoji: "
          "он будет отображаться отдельной иконкой слева от названия (или /cancel).")
@@ -1527,7 +1500,7 @@ async def adm_design_save(message: Message, state: FSMContext):
     if key in {"document_privacy_url", "document_agreement_url", "document_terms_url"}:
         stored_value = (message.text or "").strip()
         if not valid_document_url(stored_value):
-            await message.answer("Отправьте полную HTTPS-ссылку на документ, например https://telegra.ph/…")
+            await screen_reply(message,"Отправьте полную HTTPS-ссылку на документ, например https://telegra.ph/…")
             return
     else:
         stored_value = message_text_with_custom_emoji(message)
@@ -1541,7 +1514,7 @@ async def adm_design_save(message: Message, state: FSMContext):
         )
         set_setting(f"{key}_icon_custom_emoji_id", custom_emoji_id)
     await state.clear()
-    await message.answer(
+    await screen_reply(message,
         f"✅ Сохранено: <code>{key}</code>",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🎨 К дизайну", callback_data="adm:design")],
@@ -1594,7 +1567,7 @@ async def adm_banner_start(callback: CallbackQuery, state: FSMContext):
     await state.set_state(ProductWizard.set_banner)
     await state.update_data(banner_key=key, banner_lang=lang)
     await callback.answer()
-    await callback.message.answer(f"Отправьте фото для баннера «{key}», язык {lang} (или /cancel):")
+    await screen_reply(callback,f"Отправьте фото для баннера «{key}», язык {lang} (или /cancel):")
 
 
 @dp.message(ProductWizard.set_banner, F.photo)
@@ -1620,7 +1593,7 @@ async def adm_banner_save(message: Message, bot: Bot, state: FSMContext):
         except Exception:
             pass
     await state.clear()
-    await message.answer(
+    await screen_reply(message,
         f"✅ Баннер «{key}» ({lang}) обновлён.",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🖼 К баннерам", callback_data=f"adm:banners:{lang}")],
@@ -1652,7 +1625,7 @@ async def adm_faq_add(callback: CallbackQuery, state: FSMContext):
         return
     await state.set_state(ProductWizard.faq_add_q)
     await callback.answer()
-    await callback.message.answer("Отправьте вопрос. Можно вставлять Premium Emoji прямо в текст:")
+    await screen_reply(callback,"Отправьте вопрос. Можно вставлять Premium Emoji прямо в текст:")
 
 
 @dp.message(ProductWizard.faq_add_q, F.text)
@@ -1661,7 +1634,7 @@ async def adm_faq_add_q(message: Message, state: FSMContext):
         return
     await state.update_data(faq_q=message_text_with_custom_emoji(message))
     await state.set_state(ProductWizard.faq_add_a)
-    await message.answer("Теперь отправьте ответ. Premium Emoji также поддерживаются:")
+    await screen_reply(message,"Теперь отправьте ответ. Premium Emoji также поддерживаются:")
 
 
 @dp.message(ProductWizard.faq_add_a, F.text)
@@ -1674,7 +1647,7 @@ async def adm_faq_add_a(message: Message, state: FSMContext):
     with db() as conn:
         conn.execute("INSERT INTO faq (question, answer, sort_order) VALUES (?, ?, 999)", (q, a))
     await state.clear()
-    await message.answer(
+    await screen_reply(message,
         "✅ Вопрос добавлен.",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="❓ К FAQ", callback_data="adm:faq")],
@@ -1774,7 +1747,7 @@ async def adm_balances(callback: CallbackQuery, state: FSMContext):
         return
     await callback.answer()
     await state.set_state(ProductWizard.balance_adjust)
-    await callback.message.answer(
+    await screen_reply(callback,
         "💰 <b>Корректировка баланса</b>\n\n"
         "Отправьте в формате:\n"
         "<code>USER_ID +100 причина</code>\n"
@@ -1790,28 +1763,28 @@ async def adm_balance_do(message: Message, state: FSMContext, bot: Bot):
         return
     parts = (message.text or "").split(maxsplit=2)
     if len(parts) < 2:
-        await message.answer("Формат: USER_ID ±сумма [причина]")
+        await screen_reply(message,"Формат: USER_ID ±сумма [причина]")
         return
     try:
         uid = int(parts[0])
         delta = float(parts[1].replace(",", "."))
     except ValueError:
-        await message.answer("Неверный формат числа.")
+        await screen_reply(message,"Неверный формат числа.")
         return
     reason = parts[2] if len(parts) > 2 else "Ручная корректировка админом"
     try:
         new_bal = change_balance(uid, delta, reason, admin_id=message.from_user.id)
     except ValueError as e:
-        await message.answer(str(e))
+        await screen_reply(message,str(e))
         return
     await state.clear()
-    await message.answer(
+    await screen_reply(message,
         f"✅ Баланс user <code>{uid}</code> изменён на {delta:+.0f}₽.\n"
         f"Новый баланс: <b>{new_bal:.0f}₽</b>",
         reply_markup=back_kb("adm:home"),
     )
     try:
-        await bot.send_message(
+        await screen_send(bot,
             uid,
             f"💰 Ваш баланс изменён администратором на {delta:+.0f}₽.\n"
             f"Текущий баланс: <b>{new_bal:.0f}₽</b>\n"
@@ -1849,13 +1822,13 @@ async def cmd_addpromo(message: Message):
         return
     parts = (message.text or "").split()
     if len(parts) < 3:
-        await message.answer("Формат: /addpromo CODE 100 [max_uses]")
+        await screen_reply(message,"Формат: /addpromo CODE 100 [max_uses]")
         return
     code = parts[1].upper()
     try:
         value = float(parts[2])
     except ValueError:
-        await message.answer("Сумма должна быть числом")
+        await screen_reply(message,"Сумма должна быть числом")
         return
     max_uses = int(parts[3]) if len(parts) > 3 else None
     with db() as conn:
@@ -1865,9 +1838,9 @@ async def cmd_addpromo(message: Message):
                 (code, value, max_uses),
             )
         except Exception as e:
-            await message.answer(f"Ошибка: {e}")
+            await screen_reply(message,f"Ошибка: {e}")
             return
-    await message.answer(f"✅ Промокод <code>{code}</code> на {value:.0f}₽ создан.")
+    await screen_reply(message,f"✅ Промокод <code>{code}</code> на {value:.0f}₽ создан.")
 
 
 # ─── original product admin (abbreviated but functional) ────────────────────
@@ -1946,7 +1919,7 @@ async def adm_edit_field(callback: CallbackQuery, state: FSMContext):
     await state.update_data(product_id=pid, field=field)
     await state.set_state(ProductWizard.edit_value)
     await callback.answer()
-    await callback.message.answer(f"Отправьте новое значение для «{field}» (Premium Emoji поддерживаются, или /cancel):")
+    await screen_reply(callback,f"Отправьте новое значение для «{field}» (Premium Emoji поддерживаются, или /cancel):")
 
 
 @dp.message(ProductWizard.edit_value, F.text)
@@ -1968,7 +1941,7 @@ async def adm_edit_value(message: Message, state: FSMContext):
                 (parse_price_rub(value), pid),
             )
     await state.clear()
-    await message.answer(
+    await screen_reply(message,
         "✅ Сохранено.",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="⚙️ К товару", callback_data=f"adm:p:{pid}")],
@@ -1982,7 +1955,7 @@ async def adm_add_start(callback: CallbackQuery, state: FSMContext):
         return
     await state.set_state(ProductWizard.add_name)
     await callback.answer()
-    await callback.message.answer("Отправьте название товара (Premium Emoji поддерживаются):")
+    await screen_reply(callback,"Отправьте название товара (Premium Emoji поддерживаются):")
 
 
 @dp.message(ProductWizard.add_name, F.text)
@@ -1991,7 +1964,7 @@ async def adm_add_name(message: Message, state: FSMContext):
         return
     await state.update_data(name=message_text_with_custom_emoji(message))
     await state.set_state(ProductWizard.add_price)
-    await message.answer("Отправьте цену (например: 3490₽):")
+    await screen_reply(message,"Отправьте цену (например: 3490₽):")
 
 
 @dp.message(ProductWizard.add_price, F.text)
@@ -2000,7 +1973,7 @@ async def adm_add_price(message: Message, state: FSMContext):
         return
     await state.update_data(price=message.text)
     await state.set_state(ProductWizard.add_description)
-    await message.answer("Отправьте описание товара. Premium Emoji поддерживаются:")
+    await screen_reply(message,"Отправьте описание товара. Premium Emoji поддерживаются:")
 
 
 @dp.message(ProductWizard.add_description, F.text)
@@ -2016,7 +1989,7 @@ async def adm_add_description(message: Message, state: FSMContext):
         )
         pid = cur.lastrowid
     await state.clear()
-    await message.answer(
+    await screen_reply(message,
         f"✅ Товар создан (ID {pid}).",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="⚙️ Настроить", callback_data=f"adm:p:{pid}")],
@@ -2073,7 +2046,7 @@ async def adm_settings(callback: CallbackQuery):
 @dp.message(Command("cancel"))
 async def cmd_cancel(message: Message, state: FSMContext):
     await state.clear()
-    await message.answer("Отменено.")
+    await screen_reply(message,"Отменено.")
 
 
 @dp.message(Command("reply"))
@@ -2082,16 +2055,16 @@ async def cmd_reply(message: Message, bot: Bot):
         return
     parts = (message.text or "").split(maxsplit=2)
     if len(parts) < 3 or not parts[1].isdigit():
-        await message.answer("Формат: /reply TELEGRAM_ID текст")
+        await screen_reply(message,"Формат: /reply TELEGRAM_ID текст")
         return
     try:
-        await bot.send_message(
+        await screen_send(bot,
             int(parts[1]),
             "💬 <b>Сообщение от поддержки PLS Store</b>\n\n" + html.escape(parts[2]),
         )
-        await message.answer("✅ Отправлено.")
+        await screen_reply(message,"✅ Отправлено.")
     except Exception as exc:
-        await message.answer(f"Ошибка: {exc}")
+        await screen_reply(message,f"Ошибка: {exc}")
 
 
 # ─── Platega callback HTTP server ───────────────────────────────────────────
