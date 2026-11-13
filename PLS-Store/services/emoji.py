@@ -18,6 +18,7 @@ from services.db import get_setting, set_setting
 
 log = logging.getLogger(__name__)
 CACHE_KEY = "published_custom_emoji"
+AGREEMENT_CACHE_KEY = "published_agreement_emoji"
 DEFAULT_PACK = "PLSstoreemoje"
 FLAGS_PACK = "PLSStoreFlags"
 # Semantic button icons can differ from the ordinary emoji used in their label.
@@ -38,6 +39,21 @@ ALIASES = {
 
 def normalized(emoji: str) -> str:
     return re.sub(r"[\U0001f3fb-\U0001f3ff]", "", emoji.replace("\ufe0f", ""))
+
+
+def agreement_emoji_html():
+    """Use an explicit published ID, outside the text-link entity."""
+    emoji_id = str(get_setting(AGREEMENT_CACHE_KEY, ""))
+    if not emoji_id.isdigit():
+        try:
+            cached = json.loads(get_setting(CACHE_KEY, "{}"))
+            # The document is the same asset used by the article, not a Unicode scroll.
+            emoji_id = str(cached.get("📄", "")) if isinstance(cached, dict) else ""
+        except (ValueError, TypeError):
+            emoji_id = ""
+    if emoji_id.isdigit():
+        return f'<tg-emoji emoji-id="{emoji_id}">📄</tg-emoji> '
+    return ""
 
 
 class PackEmojiMiddleware(BaseRequestMiddleware):
@@ -83,8 +99,11 @@ class PackEmojiMiddleware(BaseRequestMiddleware):
     async def refresh(self, bot) -> int:
         ids = {}
         wave_candidates = []
+        agreement_candidates = []
         names = [raw.strip().rstrip("/").rsplit("/", 1)[-1]
                  for raw in os.getenv("CUSTOM_EMOJI_PACKS", DEFAULT_PACK).split(",") if raw.strip()]
+        if DEFAULT_PACK not in names:
+            names.insert(0, DEFAULT_PACK)
         if FLAGS_PACK not in names:
             names.append(FLAGS_PACK)
         for raw_name in names:
@@ -96,6 +115,13 @@ class PackEmojiMiddleware(BaseRequestMiddleware):
                 raise ValueError(f"{name} is not a custom emoji set")
             if name != FLAGS_PACK:
                 wave_candidates.extend(sticker_set.stickers)
+            if name == DEFAULT_PACK:
+                agreement_candidates = [
+                    sticker for sticker in sticker_set.stickers
+                    if (getattr(sticker, "is_animated", False) or getattr(sticker, "is_video", False))
+                    and normalized(getattr(sticker, "emoji", "") or "") in ("📜", "📄")
+                    and str(getattr(sticker, "custom_emoji_id", "")).isdigit()
+                ]
             for sticker in sticker_set.stickers:
                 if sticker.emoji and sticker.custom_emoji_id and str(sticker.custom_emoji_id).isdigit():
                     emoji = normalized(sticker.emoji)
@@ -113,6 +139,10 @@ class PackEmojiMiddleware(BaseRequestMiddleware):
                 ids["👋"] = wave_id
         if not ids:
             raise ValueError("Published emoji set contains no usable custom emoji IDs")
+        if agreement_candidates:
+            selected = min(agreement_candidates, key=lambda sticker: normalized(sticker.emoji) != "📜")
+            set_setting(AGREEMENT_CACHE_KEY, str(selected.custom_emoji_id))
+            log.info("Agreement animated emoji loaded from %s: %s", DEFAULT_PACK, selected.custom_emoji_id)
         set_setting(CACHE_KEY, json.dumps(ids, ensure_ascii=False))
         self.ids = ids
         self._compile()

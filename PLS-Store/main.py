@@ -74,7 +74,7 @@ from services.pricing import product_price, price_label, percent
 from services.product_article import article_pages, is_article_product, publication_worker
 from services.broadcasts import worker as broadcast_worker
 from services.platega import PlategaClient, PlategaError
-from services.emoji import PackEmojiMiddleware
+from services.emoji import PackEmojiMiddleware, agreement_emoji_html, AGREEMENT_CACHE_KEY
 from services.payment_ledger import settle_payment, money
 from services.checkout import prepare_checkout, balance_checkout
 from services.screens import screen_reply, screen_send
@@ -502,7 +502,7 @@ def build_product_caption(product, *, max_desc: int = 420, lang: str = "ru") -> 
     if re.search(r"\w", plain_stored_text(license_text)):
         lines.append(f"📜 {html.escape(license_text)}")
     license_label = {"ru": "Лицензионное соглашение", "en": "License Agreement", "uk": "Ліцензійна угода"}.get(lang, "Лицензионное соглашение")
-    lines.append(f'<a href="{html.escape(document_url("license"), quote=True)}">📄 {license_label}</a>')
+    lines.append(f'{agreement_emoji_html()}<a href="{html.escape(document_url("license"), quote=True)}">{license_label}</a>')
     return "\n\n".join(lines)
 
 
@@ -1489,7 +1489,10 @@ async def cmd_sync_emojis(message: Message, bot: Bot):
         await screen_reply(message,"Не удалось загрузить набор эмодзи. Проверьте CUSTOM_EMOJI_PACKS и доступ бота к Telegram.")
         return
     wave_status = "Анимированная ладонь подключена." if middleware.emoji_id("👋") else "Ладонь 👋 в наборе пока не найдена."
-    await screen_reply(message,f"✅ Набор обновлён: {count} эмодзи.\n{wave_status}\nОткройте главное меню заново.")
+    agreement_status = ("Анимированный значок соглашения из PLSstoreemoje подключён."
+                        if get_setting(AGREEMENT_CACHE_KEY, "").isdigit()
+                        else "В PLSstoreemoje не найден анимированный значок соглашения или документа.")
+    await screen_reply(message,f"✅ Набор обновлён: {count} эмодзи.\n{wave_status}\n{agreement_status}\nОткройте карточку товара заново.")
 
 
 @dp.message(Command("admin"))

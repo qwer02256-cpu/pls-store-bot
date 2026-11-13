@@ -153,6 +153,30 @@ class EmojiTests(unittest.IsolatedAsyncioTestCase):
                 middleware = PackEmojiMiddleware()
             self.assertEqual(middleware.render_html('👤 Профиль'), '👤 Профиль')
 
+    async def test_agreement_selects_animated_id_from_requested_pack_over_static_duplicates(self):
+        from services.emoji import AGREEMENT_CACHE_KEY, agreement_emoji_html
+        def sticker(glyph, emoji_id, animated=False):
+            return SimpleNamespace(emoji=glyph, custom_emoji_id=emoji_id, is_animated=animated, is_video=False)
+        packs = {
+            'PLSstoreemoje': SimpleNamespace(sticker_type='custom_emoji', stickers=[
+                sticker('📜', '111111'),
+                sticker('📄', '222222', True),
+                sticker('📜', '333333', True),
+            ]),
+            'AnotherPack': SimpleNamespace(sticker_type='custom_emoji', stickers=[sticker('📜', '444444', True)]),
+            'PLSStoreFlags': SimpleNamespace(sticker_type='custom_emoji', stickers=[]),
+        }
+        async def get_pack(name, request_timeout):
+            return packs[name]
+        api = SimpleNamespace(get_sticker_set=AsyncMock(side_effect=get_pack))
+        settings = {}
+        with patch('services.emoji.set_setting', side_effect=lambda key, value: settings.update({key: value})), patch.dict('os.environ', {'CUSTOM_EMOJI_PACKS': 'AnotherPack'}):
+            await self.mw.refresh(api)
+        self.assertEqual(settings[AGREEMENT_CACHE_KEY], '333333')
+        self.assertEqual([c.kwargs['name'] for c in api.get_sticker_set.await_args_list], ['PLSstoreemoje', 'AnotherPack', 'PLSStoreFlags'])
+        with patch('services.emoji.get_setting', side_effect=lambda key, default='': settings.get(key, default)):
+            self.assertEqual(agreement_emoji_html(), '<tg-emoji emoji-id="333333">📄</tg-emoji> ')
+
 
 if __name__ == '__main__':
     unittest.main()

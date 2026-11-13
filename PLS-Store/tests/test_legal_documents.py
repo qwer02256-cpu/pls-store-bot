@@ -183,17 +183,20 @@ class LegalDocumentsTests(unittest.IsolatedAsyncioTestCase):
         caption = main.build_product_caption(product)
         self.assertTrue(caption.startswith("<b>AutoStars</b>"))
         self.assertNotIn("💎", caption)
-        self.assertIn('>📄 Лицензионное соглашение</a>', caption)
-        from services.emoji import PackEmojiMiddleware
-        with patch('services.emoji.get_setting', return_value=json.dumps({'📄': '123456', '📜': '999999'})):
+        self.assertIn('>Лицензионное соглашение</a>', caption)
+        from services.emoji import PackEmojiMiddleware, AGREEMENT_CACHE_KEY
+        db.set_setting(AGREEMENT_CACHE_KEY, "123456")
+        caption = main.build_product_caption(product)
+        footer = caption.splitlines()[-1]
+        self.assertTrue(footer.startswith('<tg-emoji emoji-id="123456">📄</tg-emoji> <a href='))
+        self.assertNotIn('<a href="' + document_url("license") + '"><tg-emoji', footer)
+        with patch('services.emoji.get_setting', return_value=json.dumps({'📄': '777777'})):
             middleware = PackEmojiMiddleware()
-        rendered_footer = middleware.render_html(caption.splitlines()[-1])
-        self.assertIn('emoji-id="123456"', rendered_footer)
-        self.assertNotIn('emoji-id="999999"', rendered_footer)
+        self.assertEqual(middleware.render_html(footer), footer)
         self.assertNotIn("💬", caption)
         self.assertNotIn("\n\n📜\n", caption)
         self.assertIn('жми</a>\n\n💰 Цена:', caption)
-        self.assertIn('</b>\n\n<a href=', caption)
+        self.assertIn('</b>\n\n<tg-emoji emoji-id="123456">', caption)
         self.assertIn("Лицензионное соглашение</a>", caption.splitlines()[-1])
         self.assertIn(
             document_url("license").replace("&", "&amp;"), caption.splitlines()[-1]
