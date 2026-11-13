@@ -273,6 +273,7 @@ class LicenseTests(unittest.IsolatedAsyncioTestCase):
             text="Detailed custom guide",
             document=None,
             answer=AsyncMock(),
+            answer_photo=AsyncMock(),
         )
         with patch.object(handlers, "ADMIN_ID", 1):
             await handlers.upload(message, state, Mock())

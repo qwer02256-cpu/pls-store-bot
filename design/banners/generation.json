@@ -1,0 +1,53 @@
+{
+  "date": "2026-11-14",
+  "tool": "image_gen.imagegen",
+  "reference": "sources/profile-background.png",
+  "requirements": "No logo, no text, no watermark. Dark black-purple background, glossy purple 3D objects, flowing violet neon waves. Empty left 52%, empty top 24%; thematic objects on right below header. Brand and localized text composed by tools/render_banners.py.",
+  "new_scenes": [
+    {
+      "key": "licenses",
+      "illustration": "a premium glossy purple key, translucent license certificate with abstract embossed lines and a verified shield",
+      "source": "sources/licenses-background.png"
+    },
+    {
+      "key": "license_detail",
+      "illustration": "a glossy purple key inserted into a translucent security shield, a small account badge and verified check medallion",
+      "source": "sources/license_detail-background.png"
+    },
+    {
+      "key": "product",
+      "illustration": "a premium purple software product box with an abstract puzzle piece, floating minimal code window and glossy power button",
+      "source": "sources/product-background.png"
+    },
+    {
+      "key": "checkout",
+      "illustration": "a glossy purple shopping bag, wallet and small payment card, with a clean purchase receipt",
+      "source": "sources/checkout-background.png"
+    },
+    {
+      "key": "payment",
+      "illustration": "a glossy purple bank card with a generic geometric payment symbol, wallet and coins, no readable bank or card numbers",
+      "source": "sources/payment-background.png"
+    },
+    {
+      "key": "success",
+      "illustration": "a large glossy purple verified checkmark medallion, small receipt and subtle celebratory luminous particles, no currency or price text",
+      "source": "sources/success-background.png"
+    },
+    {
+      "key": "promo",
+      "illustration": "a glossy purple gift box with ribbon, floating voucher ticket and embossed percent symbol",
+      "source": "sources/promo-background.png"
+    },
+    {
+      "key": "admin",
+      "illustration": "a glossy purple dashboard panel, gear and protective shield, no tiny readable UI text",
+      "source": "sources/admin-background.png"
+    },
+    {
+      "key": "api",
+      "illustration": "glossy purple curly code braces, connected translucent cubes, an integration plug and smooth connection arcs",
+      "source": "sources/api-background.png"
+    }
+  ]
+}

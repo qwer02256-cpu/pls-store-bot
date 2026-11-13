@@ -294,6 +294,17 @@ def init_db() -> None:
                 "INSERT INTO bot_settings(key, value) VALUES ('banner_series_2026_11_applied', '1')"
             )
 
+        # Activate the complete right-aligned series once, keeping old uploads recoverable.
+        if not conn.execute("SELECT 1 FROM bot_settings WHERE key='banner_series_right_63_v1'").fetchone():
+            from services.banners import BANNER_KEYS
+            for section in BANNER_KEYS:
+                for suffix in ("", "_ru", "_en", "_uk"):
+                    key = f"banner_{section}{suffix}"
+                    conn.execute("INSERT OR IGNORE INTO bot_settings(key,value) SELECT ?,value FROM bot_settings WHERE key=?",
+                                 (key + "_before_right_63_v1", key))
+                    conn.execute("DELETE FROM bot_settings WHERE key=?", (key,))
+            conn.execute("INSERT INTO bot_settings(key,value) VALUES('banner_series_right_63_v1','applied')")
+
         # seed FAQ if empty
         faq_count = conn.execute("SELECT COUNT(*) AS c FROM faq").fetchone()["c"]
         if faq_count == 0:

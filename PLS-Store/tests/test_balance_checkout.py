@@ -37,7 +37,7 @@ class BalanceCheckoutTests(unittest.IsolatedAsyncioTestCase):
                 (self.pid, str(plugin), "Detailed installation guide"),
             )
         self.user = SimpleNamespace(id=10, username="buyer", first_name="Buyer")
-        self.message = SimpleNamespace(answer=AsyncMock(), message_id=123)
+        self.message = SimpleNamespace(answer_photo=AsyncMock(), answer=AsyncMock(), message_id=123)
         self.call = SimpleNamespace(
             answer=AsyncMock(),
             from_user=self.user,
@@ -46,7 +46,7 @@ class BalanceCheckoutTests(unittest.IsolatedAsyncioTestCase):
         )
         self.bot = SimpleNamespace(
             me=AsyncMock(return_value=SimpleNamespace(username="store_bot")),
-            send_message=AsyncMock(),
+            send_photo=AsyncMock(), send_message=AsyncMock(),
             send_document=AsyncMock(),
         )
         self.token = "a" * 24
@@ -366,7 +366,7 @@ class BalanceCheckoutTests(unittest.IsolatedAsyncioTestCase):
             await main.process_confirmed_payment(
                 "tx", dict(status="CONFIRMED", amount=249), self.bot
             )
-        receipt = self.bot.send_message.call_args.args[1]
+        receipt = self.bot.send_photo.call_args.kwargs["caption"]
         self.assertIn("Списано с баланса: <b>100.00₽", receipt)
         self.assertIn("Доплата через Platega: <b>249.00₽", receipt)
         self.assertIn("Остаток на балансе: <b>0.00₽", receipt)

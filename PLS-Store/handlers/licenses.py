@@ -12,7 +12,8 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, BufferedIn
 from config import ADMIN_ID, DB_PATH
 from services.db import db, ensure_user, get_user_language
 from services.licenses import owned, mutate, issue, audit
-from services.screens import screen_reply, screen_send
+from services.screens import screen_send
+from services.banners import themed_reply as screen_reply
 
 router = Router()
 router.message.filter(F.chat.type == "private")
@@ -142,6 +143,7 @@ async def show_list(target, uid, page=0):
         target,
         f"<b>PLS Store</b>\n{title(uid)}\n━━━━━━━━━━━━━━━━━━━━\n\n"
         + ("Выберите лицензию." if rows else "Пока нет лицензий."),
+        banner_key="licenses",
         reply_markup=keyboard(
             buttons
             + [

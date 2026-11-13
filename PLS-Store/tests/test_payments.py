@@ -85,7 +85,7 @@ class PaymentFlowTests(unittest.IsolatedAsyncioTestCase):
             db.init_db();db.ensure_user(1)
             with db.db() as conn:conn.execute("INSERT INTO payments(user_id,amount,platega_id) VALUES(1,100,'tx')")
             provider=SimpleNamespace(get_status=AsyncMock())
-            callback=SimpleNamespace(answer=AsyncMock(),message=SimpleNamespace(answer=AsyncMock()),from_user=SimpleNamespace(id=2),data='paystatus:tx')
+            callback=SimpleNamespace(answer_photo=AsyncMock(), answer=AsyncMock(),message=SimpleNamespace(answer_photo=AsyncMock(), answer=AsyncMock()),from_user=SimpleNamespace(id=2),data='paystatus:tx')
             with patch.object(main,'platega',provider):await main.cb_pay_status(callback,SimpleNamespace())
             provider.get_status.assert_not_awaited()
 
@@ -103,7 +103,7 @@ class PaymentFlowTests(unittest.IsolatedAsyncioTestCase):
             db.init_db();db.ensure_user(2)
             with db.db() as conn:conn.execute("INSERT INTO payments(user_id,amount,platega_id) VALUES(2,100,'tx')")
             client=PlategaClient('merchant','secret')
-            request=SimpleNamespace(app={'bot':SimpleNamespace(send_message=AsyncMock())},headers={'X-MerchantId':'merchant','X-Secret':'secret'},json=AsyncMock(return_value={'id':'tx','status':'CONFIRMED','amount':100,'currency':'RUB'}))
+            request=SimpleNamespace(app={'bot':SimpleNamespace(send_photo=AsyncMock(), send_message=AsyncMock())},headers={'X-MerchantId':'merchant','X-Secret':'secret'},json=AsyncMock(return_value={'id':'tx','status':'CONFIRMED','amount':100,'currency':'RUB'}))
             try:
                 with patch.object(main,'platega',client):
                     self.assertEqual((await main.platega_callback_handler(request)).status,200)
@@ -111,7 +111,7 @@ class PaymentFlowTests(unittest.IsolatedAsyncioTestCase):
                     request.headers={}
                     self.assertEqual((await main.platega_callback_handler(request)).status,403)
                 self.assertEqual(db.get_user(2)['balance'],100)
-                request.app['bot'].send_message.assert_awaited_once()
+                request.app['bot'].send_photo.assert_awaited_once()
             finally:await client.aclose()
 
 
@@ -144,13 +144,13 @@ class MonitorTests(unittest.IsolatedAsyncioTestCase):
             with db.db() as conn:conn.execute("INSERT INTO payments(user_id,amount,platega_id) VALUES(2,100,'tx')")
             data={'id':'tx','status':'CONFIRMED','paymentDetails':{'amount':100,'currency':'RUB'}}
             client=SimpleNamespace(get_status=AsyncMock(return_value=data))
-            bot=SimpleNamespace(send_message=AsyncMock())
+            bot=SimpleNamespace(send_photo=AsyncMock(), send_message=AsyncMock())
             async def confirmed(tx,payload):await main.process_confirmed_payment(tx,payload,bot)
             await reconcile_pending(client,confirmed)
             await main.process_confirmed_payment('tx',data,bot)
             await reconcile_pending(client,confirmed)
             self.assertEqual(db.get_user(2)['balance'],100)
-            bot.send_message.assert_awaited_once()
+            bot.send_photo.assert_awaited_once()
             client.get_status.assert_awaited_once()
 
     async def test_network_error_keeps_payment_pending_for_retry(self):
@@ -185,14 +185,14 @@ class InvoiceTests(unittest.IsolatedAsyncioTestCase):
             db.init_db()
             data={'transactionId':'tx','redirect':'https://app.platega.io/pay/tx','status':'CONFIRMED','paymentDetails':{'amount':100.25,'currency':'RUB'}}
             provider=SimpleNamespace(create_payment=AsyncMock(return_value=data),get_status=AsyncMock(return_value=data))
-            bot=SimpleNamespace(me=AsyncMock(return_value=SimpleNamespace(username='store_bot')),send_message=AsyncMock())
-            message=SimpleNamespace(answer=AsyncMock())
+            bot=SimpleNamespace(me=AsyncMock(return_value=SimpleNamespace(username='store_bot')),send_photo=AsyncMock(), send_message=AsyncMock())
+            message=SimpleNamespace(answer_photo=AsyncMock(), answer=AsyncMock())
             actor=SimpleNamespace(id=2,username='buyer',first_name='Buyer')
             with patch.object(main,'platega',provider):
                 await main.create_topup(message,actor,100.25,bot)
             with db.db() as conn:self.assertEqual(conn.execute('SELECT status FROM payments').fetchone()[0],'PENDING')
-            self.assertIn('100.25₽',message.answer.call_args.args[0])
-            keyboard=message.answer.call_args.kwargs['reply_markup']
+            self.assertIn('100.25₽',message.answer_photo.call_args.kwargs['caption'])
+            keyboard=message.answer_photo.call_args.kwargs['reply_markup']
             self.assertEqual(keyboard.inline_keyboard[0][0].url,data['redirect'])
             async def confirm(tx,payload):await main.process_confirmed_payment(tx,payload,bot)
             await reconcile_pending(provider,confirm)
@@ -203,7 +203,7 @@ class InvoiceTests(unittest.IsolatedAsyncioTestCase):
             db.init_db()
             provider=SimpleNamespace(create_payment=AsyncMock(return_value={'status':'PENDING'}))
             bot=SimpleNamespace(me=AsyncMock(return_value=SimpleNamespace(username='store_bot')))
-            message=SimpleNamespace(answer=AsyncMock())
+            message=SimpleNamespace(answer_photo=AsyncMock(), answer=AsyncMock())
             with patch.object(main,'platega',provider):
                 await main.create_topup(message,SimpleNamespace(id=2,username=None,first_name='Buyer'),100,bot)
             with db.db() as conn:self.assertEqual(conn.execute('SELECT COUNT(*) FROM payments').fetchone()[0],0)
@@ -229,7 +229,7 @@ class MinimumTopupTests(unittest.IsolatedAsyncioTestCase):
             db.init_db()
             provider=SimpleNamespace(create_payment=AsyncMock(return_value={'id':'one','redirect':'https://app.platega.io/pay/one','status':'PENDING'}))
             bot=SimpleNamespace(me=AsyncMock(return_value=SimpleNamespace(username='store_bot')))
-            message=SimpleNamespace(answer=AsyncMock())
+            message=SimpleNamespace(answer_photo=AsyncMock(), answer=AsyncMock())
             user=SimpleNamespace(id=2,username=None,first_name='Buyer')
             with patch.object(main,'platega',provider):
                 await main.create_topup(message,user,1,bot)
@@ -261,12 +261,12 @@ class PaymentMethodTests(unittest.IsolatedAsyncioTestCase):
                 db.init_db()
                 provider=SimpleNamespace(create_payment=AsyncMock(return_value={'id':'tx','redirect':'https://app.platega.io/pay/tx','status':'PENDING'}))
                 bot=SimpleNamespace(me=AsyncMock(return_value=SimpleNamespace(username='store_bot')))
-                message=SimpleNamespace(answer=AsyncMock())
+                message=SimpleNamespace(answer_photo=AsyncMock(), answer=AsyncMock())
                 with patch.object(main,'platega',provider):
                     await main.create_topup(message,SimpleNamespace(id=2,username=None,first_name='Buyer'),100,bot,payment_method=method)
                 self.assertEqual(provider.create_payment.call_args.kwargs['payment_method'],method)
                 self.assertEqual(provider.create_payment.call_args.kwargs['amount'],100)
-                text=message.answer.call_args.args[0]
+                text=message.answer_photo.call_args.kwargs['caption']
                 self.assertIn(fee,text)
                 self.assertIn('На баланс поступит: <b>100.00₽</b>',text)
                 with db.db() as conn:self.assertEqual(conn.execute('SELECT amount FROM payments').fetchone()[0],100)
@@ -274,7 +274,7 @@ class PaymentMethodTests(unittest.IsolatedAsyncioTestCase):
     async def test_amount_selection_does_not_create_invoice_before_method_choice(self):
         with tempfile.TemporaryDirectory() as tmp,patch.object(db,'DB_PATH',Path(tmp)/'db'):
             db.init_db();db.ensure_user(2)
-            callback=SimpleNamespace(answer=AsyncMock(),data='topup:100',from_user=SimpleNamespace(id=2))
+            callback=SimpleNamespace(answer_photo=AsyncMock(), answer=AsyncMock(),data='topup:100',from_user=SimpleNamespace(id=2))
             state=SimpleNamespace(clear=AsyncMock())
             with patch.object(main,'safe_edit_or_send',AsyncMock()) as render,patch.object(main,'create_topup',AsyncMock()) as create:
                 await main.cb_topup_amount(callback,state,SimpleNamespace())
@@ -283,7 +283,7 @@ class PaymentMethodTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn('8,5%',render.call_args.kwargs['reply_markup'].inline_keyboard[0][0].text)
 
     async def test_disabled_or_invalid_method_never_creates_invoice(self):
-        callback=SimpleNamespace(answer=AsyncMock(),from_user=SimpleNamespace(id=2))
+        callback=SimpleNamespace(answer_photo=AsyncMock(), answer=AsyncMock(),from_user=SimpleNamespace(id=2))
         with patch.object(main,'tr',return_value='Choose a method'),patch.object(main,'create_topup',AsyncMock()) as create:
             for value in ['topupmethod:11:100','topupmethod:2:NaN','topupmethod:13:-1']:
                 callback.data=value

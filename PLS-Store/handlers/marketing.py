@@ -7,7 +7,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from config import ADMIN_ID
 from services.db import db, get_product
-from services.screens import screen_reply
+from services.banners import themed_reply as screen_reply
 from services.pricing import percent, product_price, price_label, set_discount
 from services import broadcasts
 

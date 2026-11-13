@@ -283,11 +283,19 @@ async def screen_reply(target, text, reply_markup=None, photo=None, **kwargs):
     )
 
 
-async def screen_send(bot, chat_id, text, **kwargs):
+async def screen_send(bot, chat_id, text, photo=None, **kwargs):
     options = dict(kwargs)
     markup = options.pop("reply_markup", None) or _back(chat_id)
+    options.setdefault("link_preview_options", NO_PREVIEW)
 
     async def send():
+        if photo and photo.is_file():
+            photo_options = {k: v for k, v in options.items() if k not in ("link_preview_options", "disable_web_page_preview")}
+            if len(text) <= 1024:
+                return [await bot.send_photo(chat_id, photo=FSInputFile(photo), caption=text, reply_markup=markup, **photo_options)]
+            banner = await bot.send_photo(chat_id, photo=FSInputFile(photo))
+            content = await bot.send_message(chat_id, text, reply_markup=markup, **options)
+            return [banner, content]
         return [await bot.send_message(chat_id, text, reply_markup=markup, **options)]
 
-    return await _render(bot, chat_id, None, text, markup, None, options, send)
+    return await _render(bot, chat_id, None, text, markup, photo, options, send)

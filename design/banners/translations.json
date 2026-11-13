@@ -1,30 +1,348 @@
 {
   "en": {
-    "home": {"title": ["PLS Store"], "subtitle": ["Plugins and add-ons", "for FunPayCardinal"]},
-    "shop": {"title": ["Shop"], "subtitle": ["Choose a category"]},
-    "plugins": {"title": ["Plugins"], "subtitle": ["For FunPayCardinal"]},
-    "profile": {"title": ["Profile"], "subtitle": ["Balance and purchases"]},
-    "topup": {"title": ["Top up", "balance"], "subtitle": ["Choose an amount and", "a payment method"]},
-    "language": {"title": ["Select", "language"], "subtitle": ["Русский · Українська · English"]},
-    "faq": {"title": ["FAQ"], "subtitle": ["Frequently asked questions"]},
-    "documents": {"title": ["Documents"], "subtitle": ["Privacy Policy", "User Agreement", "Products and Pricing"]},
-    "support": {"title": ["Support"], "subtitle": ["Contact support"]},
-    "reviews": {"title": ["Reviews"], "subtitle": []},
-    "purchases": {"title": ["My purchases"], "subtitle": ["Purchase history"]},
-    "referral": {"title": ["Referral", "program"], "subtitle": ["Your invitation link"]}
+    "home": {
+      "title": [
+        "PLS Store"
+      ],
+      "subtitle": [
+        "Plugins and add-ons",
+        "for FunPayCardinal"
+      ]
+    },
+    "shop": {
+      "title": [
+        "Shop"
+      ],
+      "subtitle": [
+        "Choose a category"
+      ]
+    },
+    "plugins": {
+      "title": [
+        "Plugins"
+      ],
+      "subtitle": [
+        "For FunPayCardinal"
+      ]
+    },
+    "profile": {
+      "title": [
+        "Profile"
+      ],
+      "subtitle": [
+        "Balance and purchases"
+      ]
+    },
+    "topup": {
+      "title": [
+        "Top up",
+        "balance"
+      ],
+      "subtitle": [
+        "Choose an amount and",
+        "a payment method"
+      ]
+    },
+    "language": {
+      "title": [
+        "Select",
+        "language"
+      ],
+      "subtitle": [
+        "Русский · Українська · English"
+      ]
+    },
+    "faq": {
+      "title": [
+        "FAQ"
+      ],
+      "subtitle": [
+        "Frequently asked questions"
+      ]
+    },
+    "documents": {
+      "title": [
+        "Documents"
+      ],
+      "subtitle": [
+        "Terms, licenses and privacy"
+      ]
+    },
+    "support": {
+      "title": [
+        "Support"
+      ],
+      "subtitle": [
+        "Contact support"
+      ]
+    },
+    "reviews": {
+      "title": [
+        "Reviews"
+      ],
+      "subtitle": []
+    },
+    "purchases": {
+      "title": [
+        "My purchases"
+      ],
+      "subtitle": [
+        "Purchase history"
+      ]
+    },
+    "referral": {
+      "title": [
+        "Referral",
+        "program"
+      ],
+      "subtitle": [
+        "Your invitation link"
+      ]
+    },
+    "licenses": {
+      "title": [
+        "Licenses"
+      ],
+      "subtitle": [
+        "Plugin keys and access"
+      ]
+    },
+    "license_detail": {
+      "title": [
+        "License"
+      ],
+      "subtitle": [
+        "Status and account binding"
+      ]
+    },
+    "product": {
+      "title": [
+        "Plugin"
+      ],
+      "subtitle": [
+        "Features and access"
+      ]
+    },
+    "checkout": {
+      "title": [
+        "Checkout"
+      ],
+      "subtitle": [
+        "Balance and amount due"
+      ]
+    },
+    "payment": {
+      "title": [
+        "Payment"
+      ],
+      "subtitle": [
+        "Choose a payment method"
+      ]
+    },
+    "success": {
+      "title": [
+        "Confirmed"
+      ],
+      "subtitle": [
+        "Payment confirmed"
+      ]
+    },
+    "promo": {
+      "title": [
+        "Promo code"
+      ],
+      "subtitle": [
+        "Activate your bonus"
+      ]
+    },
+    "api": {
+      "title": [
+        "API"
+      ],
+      "subtitle": [
+        "This section is in development"
+      ]
+    },
+    "admin": {
+      "title": [
+        "Admin"
+      ],
+      "subtitle": [
+        "Store administration"
+      ]
+    }
   },
   "uk": {
-    "home": {"title": ["PLS Store"], "subtitle": ["Плагіни та доповнення", "для FunPayCardinal"]},
-    "shop": {"title": ["Магазин"], "subtitle": ["Виберіть категорію"]},
-    "plugins": {"title": ["Плагіни"], "subtitle": ["Для FunPayCardinal"]},
-    "profile": {"title": ["Профіль"], "subtitle": ["Баланс і покупки"]},
-    "topup": {"title": ["Поповнення", "балансу"], "subtitle": ["Виберіть суму та спосіб оплати"]},
-    "language": {"title": ["Виберіть", "мову"], "subtitle": ["Русский · Українська · English"]},
-    "faq": {"title": ["FAQ"], "subtitle": ["Поширені запитання"]},
-    "documents": {"title": ["Документи"], "subtitle": ["Політика конфіденційності", "Угода користувача", "Товари й тарифи"]},
-    "support": {"title": ["Підтримка"], "subtitle": ["Зв’язатися з підтримкою"]},
-    "reviews": {"title": ["Відгуки"], "subtitle": []},
-    "purchases": {"title": ["Мої покупки"], "subtitle": ["Історія покупок"]},
-    "referral": {"title": ["Реферальна", "система"], "subtitle": ["Ваше посилання", "для запрошень"]}
+    "home": {
+      "title": [
+        "PLS Store"
+      ],
+      "subtitle": [
+        "Плагіни та доповнення",
+        "для FunPayCardinal"
+      ]
+    },
+    "shop": {
+      "title": [
+        "Магазин"
+      ],
+      "subtitle": [
+        "Виберіть категорію"
+      ]
+    },
+    "plugins": {
+      "title": [
+        "Плагіни"
+      ],
+      "subtitle": [
+        "Для FunPayCardinal"
+      ]
+    },
+    "profile": {
+      "title": [
+        "Профіль"
+      ],
+      "subtitle": [
+        "Баланс і покупки"
+      ]
+    },
+    "topup": {
+      "title": [
+        "Поповнення",
+        "балансу"
+      ],
+      "subtitle": [
+        "Виберіть суму та спосіб оплати"
+      ]
+    },
+    "language": {
+      "title": [
+        "Виберіть",
+        "мову"
+      ],
+      "subtitle": [
+        "Русский · Українська · English"
+      ]
+    },
+    "faq": {
+      "title": [
+        "FAQ"
+      ],
+      "subtitle": [
+        "Поширені запитання"
+      ]
+    },
+    "documents": {
+      "title": [
+        "Документи"
+      ],
+      "subtitle": [
+        "Правила, ліцензії та дані"
+      ]
+    },
+    "support": {
+      "title": [
+        "Підтримка"
+      ],
+      "subtitle": [
+        "Зв’язатися з підтримкою"
+      ]
+    },
+    "reviews": {
+      "title": [
+        "Відгуки"
+      ],
+      "subtitle": []
+    },
+    "purchases": {
+      "title": [
+        "Мої покупки"
+      ],
+      "subtitle": [
+        "Історія покупок"
+      ]
+    },
+    "referral": {
+      "title": [
+        "Реферальна",
+        "система"
+      ],
+      "subtitle": [
+        "Ваше посилання",
+        "для запрошень"
+      ]
+    },
+    "licenses": {
+      "title": [
+        "Ліцензії"
+      ],
+      "subtitle": [
+        "Ключі та доступ до плагінів"
+      ]
+    },
+    "license_detail": {
+      "title": [
+        "Ліцензія"
+      ],
+      "subtitle": [
+        "Статус і прив’язка"
+      ]
+    },
+    "product": {
+      "title": [
+        "Про плагін"
+      ],
+      "subtitle": [
+        "Можливості та доступ"
+      ]
+    },
+    "checkout": {
+      "title": [
+        "Покупка"
+      ],
+      "subtitle": [
+        "Баланс і доплата"
+      ]
+    },
+    "payment": {
+      "title": [
+        "Оплата"
+      ],
+      "subtitle": [
+        "Виберіть спосіб оплати"
+      ]
+    },
+    "success": {
+      "title": [
+        "Готово"
+      ],
+      "subtitle": [
+        "Платіж підтверджено"
+      ]
+    },
+    "promo": {
+      "title": [
+        "Промокод"
+      ],
+      "subtitle": [
+        "Активуйте бонус"
+      ]
+    },
+    "api": {
+      "title": [
+        "API"
+      ],
+      "subtitle": [
+        "Розділ у розробці"
+      ]
+    },
+    "admin": {
+      "title": [
+        "Керування"
+      ],
+      "subtitle": [
+        "Панель адміністратора"
+      ]
+    }
   }
 }

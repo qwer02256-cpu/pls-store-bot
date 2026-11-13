@@ -238,7 +238,7 @@ class ScreenTests(unittest.IsolatedAsyncioTestCase):
         mid = home.message_id
         await licenses.list_licenses(self.call(home, "licenses"))
         self.assertTrue(home.photo)
-        self.assertIn(("caption", mid), self.bot.edits)
+        self.assertIn(("media", mid), self.bot.edits)
         await screen_reply(self.call(home, "home"), "Home again", photo=photo)
         self.assertIn(("media", mid), self.bot.edits)
         self.assertEqual(len(self.bot.messages), 1)

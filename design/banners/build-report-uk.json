@@ -1,0 +1,224 @@
+{
+  "language": "uk",
+  "brand_position": [
+    1048,
+    24
+  ],
+  "brand_size": [
+    480,
+    140
+  ],
+  "brand_sha256": "06c883f27015820f3e1a8215f6f053c4cbd20ac3369cb7eee3270989fb8cb507",
+  "banners": [
+    {
+      "key": "home",
+      "file": "PLS-Store/assets/uk/banner.png",
+      "size": [
+        1600,
+        900
+      ],
+      "sha256": "5d9ea76cc125098bfa0cb368d1330e4195e2f2b7cb012ed587ea5cb34c0f6b5c",
+      "brand_layer_verified": true
+    },
+    {
+      "key": "shop",
+      "file": "PLS-Store/assets/uk/shop.png",
+      "size": [
+        1600,
+        900
+      ],
+      "sha256": "c0a8071d9b7e7fff09f77cd1fc1b2d7602ec3e0167bc511ec8bee30b3af6df6e",
+      "brand_layer_verified": true
+    },
+    {
+      "key": "plugins",
+      "file": "PLS-Store/assets/uk/plugins.png",
+      "size": [
+        1600,
+        900
+      ],
+      "sha256": "542119bd7ca27e1bb39f8ae729c604dd346d8a91fdb62787f7ed428fbd081491",
+      "brand_layer_verified": true
+    },
+    {
+      "key": "profile",
+      "file": "PLS-Store/assets/uk/profile.png",
+      "size": [
+        1600,
+        900
+      ],
+      "sha256": "952178936c382999baa60976e64d86f887c6b368136de1df89ee26a001bdadbd",
+      "brand_layer_verified": true
+    },
+    {
+      "key": "topup",
+      "file": "PLS-Store/assets/uk/topup.png",
+      "size": [
+        1600,
+        900
+      ],
+      "sha256": "a07ec09aea530fac66099458608e12631d3da3f441a14f956f257849c1da9e7d",
+      "brand_layer_verified": true
+    },
+    {
+      "key": "language",
+      "file": "PLS-Store/assets/uk/language.png",
+      "size": [
+        1600,
+        900
+      ],
+      "sha256": "6b06deb67f53dbfa30f1ef9c6a9b74254133071fb18252bf93b3106ee52223b7",
+      "brand_layer_verified": true
+    },
+    {
+      "key": "faq",
+      "file": "PLS-Store/assets/uk/faq.png",
+      "size": [
+        1600,
+        900
+      ],
+      "sha256": "c947c001aa1cc4a4014266f8f5daee4a92e3769d3f5b22cd59e328d3c4c76c92",
+      "brand_layer_verified": true
+    },
+    {
+      "key": "documents",
+      "file": "PLS-Store/assets/uk/documents.png",
+      "size": [
+        1600,
+        900
+      ],
+      "sha256": "e91395147cc3582f72480be37e751b2e4bf108a387cc72172c8544c46887cb73",
+      "brand_layer_verified": true
+    },
+    {
+      "key": "support",
+      "file": "PLS-Store/assets/uk/support.png",
+      "size": [
+        1600,
+        900
+      ],
+      "sha256": "98139ab55bd8e0630804f9bc67bb4a5c750fea5cd3add3585928c4267825dba5",
+      "brand_layer_verified": true
+    },
+    {
+      "key": "reviews",
+      "file": "PLS-Store/assets/uk/reviews.png",
+      "size": [
+        1600,
+        900
+      ],
+      "sha256": "0568f53ee0bd323d4136ed38478627cd845cbda63b4161c5d638128e5ad976bd",
+      "brand_layer_verified": true
+    },
+    {
+      "key": "purchases",
+      "file": "PLS-Store/assets/uk/purchases.png",
+      "size": [
+        1600,
+        900
+      ],
+      "sha256": "0c9400c3f221a0068ead721796ded17c2199474cdee8fab03f63be0c7691d220",
+      "brand_layer_verified": true
+    },
+    {
+      "key": "referral",
+      "file": "PLS-Store/assets/uk/referral.png",
+      "size": [
+        1600,
+        900
+      ],
+      "sha256": "a1117c57e5c5aa4fc5402770f8f9b29c53df076548118bd98ed25776ede19da4",
+      "brand_layer_verified": true
+    },
+    {
+      "key": "licenses",
+      "file": "PLS-Store/assets/uk/licenses.png",
+      "size": [
+        1600,
+        900
+      ],
+      "sha256": "ba287e646ce01e7ec360f0ac6a16a746bf1acc9f985645d009a94819e85c7d22",
+      "brand_layer_verified": true
+    },
+    {
+      "key": "license_detail",
+      "file": "PLS-Store/assets/uk/license_detail.png",
+      "size": [
+        1600,
+        900
+      ],
+      "sha256": "f0df6aff4461bcb5f147a0da9f78c479c8527727714a599a8e4b81648e3b5dd2",
+      "brand_layer_verified": true
+    },
+    {
+      "key": "product",
+      "file": "PLS-Store/assets/uk/product.png",
+      "size": [
+        1600,
+        900
+      ],
+      "sha256": "fac4005496e357c956627d6af5d217bb973ce6201d527a509d6a790b8bc8cdc3",
+      "brand_layer_verified": true
+    },
+    {
+      "key": "checkout",
+      "file": "PLS-Store/assets/uk/checkout.png",
+      "size": [
+        1600,
+        900
+      ],
+      "sha256": "abd2b8b94a1905d490b7a3aa92d9a26685851ee8fb100d9a23e32b39468c4581",
+      "brand_layer_verified": true
+    },
+    {
+      "key": "payment",
+      "file": "PLS-Store/assets/uk/payment.png",
+      "size": [
+        1600,
+        900
+      ],
+      "sha256": "d419f1f03e6d09e6bd94d15ba34b37cb25172340a333970bbebf3b6df8a25cb8",
+      "brand_layer_verified": true
+    },
+    {
+      "key": "success",
+      "file": "PLS-Store/assets/uk/success.png",
+      "size": [
+        1600,
+        900
+      ],
+      "sha256": "6e8fcce2d81495c87a90625df7afc12442a20fd28e1ab248a2b93194ae9713bb",
+      "brand_layer_verified": true
+    },
+    {
+      "key": "promo",
+      "file": "PLS-Store/assets/uk/promo.png",
+      "size": [
+        1600,
+        900
+      ],
+      "sha256": "c8923f16d446b5bc60ca8aa94cdd1bc8bd6ea6d6db618a3a4a2e1163acbfc361",
+      "brand_layer_verified": true
+    },
+    {
+      "key": "api",
+      "file": "PLS-Store/assets/uk/api.png",
+      "size": [
+        1600,
+        900
+      ],
+      "sha256": "b8733dd512be38d4dcf6097fadf76c5190fa3230a5ceac5f181906fc1acf6556",
+      "brand_layer_verified": true
+    },
+    {
+      "key": "admin",
+      "file": "PLS-Store/assets/uk/admin.png",
+      "size": [
+        1600,
+        900
+      ],
+      "sha256": "432e2093a7891e1a315bfcf3feb8fe573d6d3dc3c310d8b836065a11177d049a",
+      "brand_layer_verified": true
+    }
+  ]
+}

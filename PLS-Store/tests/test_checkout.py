@@ -24,9 +24,9 @@ class CheckoutTests(unittest.IsolatedAsyncioTestCase):
         with db.db() as conn:
             conn.execute('INSERT INTO license_assets VALUES(?,?,?)',(self.product_id,str(plugin),'Installation guide'))
         self.user=SimpleNamespace(id=2,username='buyer',first_name='Buyer')
-        self.message=SimpleNamespace(answer=AsyncMock())
+        self.message=SimpleNamespace(answer_photo=AsyncMock(), answer=AsyncMock())
         self.callback=SimpleNamespace(from_user=self.user,message=self.message,answer=AsyncMock(),data='')
-        self.bot=SimpleNamespace(me=AsyncMock(return_value=SimpleNamespace(username='store_bot')),send_message=AsyncMock(),send_document=AsyncMock())
+        self.bot=SimpleNamespace(me=AsyncMock(return_value=SimpleNamespace(username='store_bot')),send_photo=AsyncMock(), send_message=AsyncMock(),send_document=AsyncMock())
 
     def provider(self,tx='purchase'):
         return SimpleNamespace(create_payment=AsyncMock(return_value={'id':tx,'redirect':'https://app.platega.io/pay/'+tx,'status':'PENDING'}))
@@ -62,7 +62,7 @@ class CheckoutTests(unittest.IsolatedAsyncioTestCase):
             provider=await self.invoice(method,f'tx{method}')
             self.assertEqual(provider.create_payment.call_args.kwargs['payment_method'],method)
             self.assertEqual(provider.create_payment.call_args.kwargs['amount'],249)
-            self.assertNotIn('На баланс поступит',self.message.answer.call_args.args[0])
+            self.assertNotIn('На баланс поступит',self.message.answer_photo.call_args.kwargs["caption"])
         with db.db() as conn:
             rows=conn.execute('SELECT purpose,amount,product_id,product_name FROM payments').fetchall()
             self.assertEqual([(r['purpose'],r['amount'],r['product_id'],r['product_name']) for r in rows],
@@ -106,11 +106,12 @@ class CheckoutTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(main,'ADMIN_ID',42):
             self.assertTrue(await main.process_confirmed_payment('purchase',data,self.bot))
             self.assertFalse(await main.process_confirmed_payment('purchase',data,self.bot))
-        self.assertEqual(self.bot.send_message.await_count,3)
+        self.assertEqual(self.bot.send_message.await_count,2)
         self.assertEqual(self.bot.send_document.await_count,2)
-        self.assertIn('Покупка оплачена',self.bot.send_message.await_args_list[1].args[1])
-        self.assertIn('PLS-',self.bot.send_message.await_args_list[1].args[1])
-        self.assertNotIn('Баланс пополнен',self.bot.send_message.await_args_list[1].args[1])
+        self.bot.send_photo.assert_awaited_once()
+        self.assertIn('Покупка оплачена',self.bot.send_photo.call_args.kwargs["caption"])
+        self.assertIn('PLS-',self.bot.send_photo.call_args.kwargs["caption"])
+        self.assertNotIn('Баланс пополнен',self.bot.send_photo.call_args.kwargs["caption"])
 
     async def test_hidden_product_cannot_create_new_invoice(self):
         with db.db() as conn:conn.execute('UPDATE products SET active=0 WHERE id=?',(self.product_id,))

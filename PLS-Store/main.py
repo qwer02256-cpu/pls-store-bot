@@ -73,6 +73,7 @@ from handlers.marketing import router as marketing_router
 from services.pricing import product_price, price_label, percent
 from services.product_article import article_pages, is_article_product, publication_worker
 from services.broadcasts import worker as broadcast_worker
+from services.banners import BANNER_KEYS, resolve_banner
 from services.platega import PlategaClient, PlategaError
 from services.emoji import PackEmojiMiddleware, agreement_emoji_html, AGREEMENT_CACHE_KEY
 from services.payment_ledger import settle_payment, money
@@ -446,33 +447,14 @@ def safe_stored_html(value: str | None) -> str:
 
 
 def banner_path(key: str, lang: str = "ru") -> Path | None:
-    """Resolve a language-specific upload or bundled image; fall back to Russian."""
-    lang = lang if lang in {"ru", "en", "uk"} else "ru"
-    name = get_setting(f"banner_{key}_{lang}", "")
-    if not name and lang == "ru":
-        name = get_setting(f"banner_{key}", "")
-    if name:
-        p = BANNERS_DIR / name
-        if p.is_file():
-            return p
-    if lang != "ru" and key in BANNER_KEYS:
-        filename = "banner.png" if key == "home" else f"{key}.png"
-        localized = ASSETS_DIR / lang / filename
-        if localized.is_file():
-            return localized
-        return banner_path(key, "ru")
-    # Uploaded banners take precedence over bundled section defaults.
-    if key in set(BANNER_KEYS) - {"home"}:
-        bundled = ASSETS_DIR / f"{key}.png"
-        if bundled.is_file():
-            return bundled
-    if key == "home" and BANNER_PATH.is_file():
-        return BANNER_PATH
-    return None
+    return resolve_banner(key, lang, get_setting, ASSETS_DIR, BANNERS_DIR, BANNER_PATH)
 
 
 async def safe_edit_or_send(target, text: str, reply_markup=None, photo: Path | None = None):
     """Replace the previous screen and remove stale navigation messages."""
+    data = getattr(target, "data", "")
+    if photo is None and isinstance(data, str) and data.startswith("adm:"):
+        photo = banner_path("admin", get_user_language(target.from_user.id))
     return await screen_reply(target,text,reply_markup=reply_markup,photo=photo)
 
 
@@ -726,7 +708,7 @@ async def cb_product(callback: CallbackQuery):
     ]
     keyboard = InlineKeyboardMarkup(inline_keyboard=rows)
     image_path = product.get("image_path")
-    photo = None
+    photo = banner_path("product", get_user_language(callback.from_user.id))
     if image_path:
         p = Path(image_path)
         if not p.is_absolute():
@@ -767,7 +749,7 @@ async def cb_product_article(callback: CallbackQuery):
     rows.append([InlineKeyboardButton(text=back, callback_data=f"product:{pid}", style="danger")])
     counter = f"\n\n{index+1}/{len(pages)}" if len(pages) > 1 else ""
     await screen_reply(callback, pages[index] + counter,
-                       reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+                       reply_markup=InlineKeyboardMarkup(inline_keyboard=rows), photo=banner_path("product", lang))
 
 
 def product_checkout_token(user, message, pid, token=None):
@@ -852,6 +834,7 @@ async def cb_buy_balance(callback: CallbackQuery, bot: Bot):
         reply_markup=payment_methods_kb(
             quote["remaining"], lang, product_id=product_id, checkout_id=checkout["id"]
         ),
+        photo=banner_path("checkout", lang),
     )
 
 
@@ -932,7 +915,7 @@ async def cb_api_info(callback: CallbackQuery):
     text = get_setting("api_info_text", tr(callback.from_user.id, "api_info"))
     if get_user_language(callback.from_user.id) == "en" and text.startswith("⚡ <b>API</b>"):
         text = tr(callback.from_user.id, "api_info")
-    await safe_edit_or_send(callback, text, reply_markup=back_kb("profile"))
+    await safe_edit_or_send(callback, text, reply_markup=back_kb("profile"), photo=banner_path("api", get_user_language(callback.from_user.id)))
 
 
 @dp.callback_query(F.data == "promo")
@@ -941,6 +924,7 @@ async def cb_promo(callback: CallbackQuery, state: FSMContext):
     await state.set_state(ProductWizard.promo_create)  # reuse for input
     await screen_reply(callback,
         tr(callback.from_user.id, "promo_enter"),
+        photo=banner_path("promo", get_user_language(callback.from_user.id)),
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="⬅️ Отмена", callback_data="profile")]
         ]),
@@ -1063,7 +1047,7 @@ async def show_payment_methods(target, user, amount):
         return False
     lang = get_user_language(user.id)
     await safe_edit_or_send(target, tr(user.id, "payment_method_choose", amount=amount),
-                            reply_markup=payment_methods_kb(amount, lang), photo=banner_path("topup", lang))
+                            reply_markup=payment_methods_kb(amount, lang), photo=banner_path("payment", lang))
     return True
 
 
@@ -1174,6 +1158,7 @@ async def create_payment_invoice(message: Message, user, amount, bot: Bot, payme
         fee_text = tr(user.id, "purchase_fee_details", method=label, fee=fee)
     await screen_reply(message,
         invoice_text + "\n\n" + fee_text,
+        photo=banner_path("payment", get_user_language(user.id)),
         reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
     )
 
@@ -1197,7 +1182,7 @@ async def cb_pay_status(callback: CallbackQuery, bot: Bot):
         await screen_reply(callback,f"Ошибка: {e}")
         return
     status = (data.get("status") or "").upper()
-    await screen_reply(callback,tr(callback.from_user.id, "status", tx_id=tx_id, status=status))
+    await screen_reply(callback,tr(callback.from_user.id, "status", tx_id=tx_id, status=status), photo=banner_path("payment", get_user_language(callback.from_user.id)))
     if status == "CONFIRMED":
         try:
             await process_confirmed_payment(tx_id, data, bot)
@@ -1249,6 +1234,7 @@ async def notify_purchase(result, bot):
                 result["external_amount"],
                 result["balance"],
             ),
+            photo=banner_path("success", get_user_language(user_id)),
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
                     [
@@ -1309,6 +1295,7 @@ async def process_confirmed_payment(tx_id: str, data: dict, bot: Bot) -> bool:
         await screen_send(bot,
             user_id,
             (f"✅ Balance topped up by <b>{amount:.2f}₽</b>.\nCurrent balance: <b>{new_bal:.2f}₽</b>" if get_user_language(user_id) == "en" else f"✅ Баланс пополнен на <b>{amount:.2f}₽</b>.\nТекущий баланс: <b>{new_bal:.2f}₽</b>"),
+            photo=banner_path("success", get_user_language(user_id)),
         )
     except Exception:
         log.warning("Top-up credited but user notification failed")
@@ -1386,7 +1373,7 @@ async def show_document(target, key, index):
     back = "documents" if has_accepted_license(target.from_user.id) else "legal:gate"
     lang = get_user_language(target.from_user.id)
     rows.append([InlineKeyboardButton(text=tr(target.from_user.id, "back"), callback_data=back, style="danger")])
-    await screen_reply(target, pages[index] + f"\n\n{index+1}/{len(pages)}", reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+    await screen_reply(target, pages[index] + f"\n\n{index+1}/{len(pages)}", reply_markup=InlineKeyboardMarkup(inline_keyboard=rows), photo=banner_path("documents", lang))
 
 
 @dp.callback_query(F.data.startswith("legal:"))
@@ -1500,7 +1487,7 @@ async def cmd_sync_emojis(message: Message, bot: Bot):
 async def cmd_admin(message: Message):
     if not is_admin(message.from_user.id):
         return
-    await screen_reply(message,"🛠 <b>Админ-панель PLS Store</b>", reply_markup=admin_home_keyboard())
+    await screen_reply(message,"🛠 <b>Админ-панель PLS Store</b>", reply_markup=admin_home_keyboard(), photo=banner_path("admin", get_user_language(message.from_user.id)))
 
 
 @dp.callback_query(F.data == "adm:home")
@@ -1613,8 +1600,7 @@ async def adm_design_save(message: Message, state: FSMContext):
 
 
 # --- banners ---
-BANNER_KEYS = ["home", "profile", "shop", "faq", "topup", "language", "plugins",
-               "documents", "support", "reviews", "purchases", "referral"]
+
 
 
 @dp.callback_query((F.data == "adm:banners") | F.data.startswith("adm:banners:"))
@@ -2263,7 +2249,7 @@ async def main():
     init_db()
     available_banners = sum(banner_path(key, lang) is not None
                             for lang in ("ru", "en", "uk") for key in BANNER_KEYS)
-    log.info("Banner release: pls-purple-2026-11-v4-i18n | available=%s/%s | languages=ru,en,uk",
+    log.info("Banner release: pls-purple-2026-11-v5-right-63 | available=%s/%s | languages=ru,en,uk",
              available_banners, len(BANNER_KEYS) * 3)
     seed_if_empty()
     bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))

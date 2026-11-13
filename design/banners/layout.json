@@ -1,0 +1,28 @@
+{
+  "size": [
+    1600,
+    900
+  ],
+  "brand_position": [
+    1048,
+    24
+  ],
+  "brand_size": [
+    480,
+    140
+  ],
+  "title_position": [
+    72,
+    292
+  ],
+  "title_size": 96,
+  "title_step": 116,
+  "title_width": 760,
+  "subtitle_x": 76,
+  "subtitle_size": 48,
+  "subtitle_width": 700,
+  "subtitle_gap": 28,
+  "subtitle_step": 60,
+  "subtitle_color": "#ddc6f4",
+  "text_bottom": 715
+}
