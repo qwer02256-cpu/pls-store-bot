@@ -71,6 +71,7 @@ from services.db import (
 from handlers.licenses import router as license_router, deliver, retry_deliveries
 from handlers.marketing import router as marketing_router
 from services.pricing import product_price, price_label, percent
+from services.product_article import article_pages, is_article_product, publication_worker
 from services.broadcasts import worker as broadcast_worker
 from services.platega import PlategaClient, PlategaError
 from services.emoji import PackEmojiMiddleware
@@ -716,6 +717,12 @@ async def cb_product(callback: CallbackQuery):
         [InlineKeyboardButton(text=tr(callback.from_user.id, "back_catalog"), callback_data="catalog:plugins")],
         [InlineKeyboardButton(text=tr(callback.from_user.id, "home"), callback_data="home")],
     ]
+    article_url = product.get("article_url")
+    if article_url or is_article_product(product_id):
+        label = {"ru": "📄 Подробнее", "en": "📄 Read more", "uk": "📄 Докладніше"}[get_user_language(callback.from_user.id)]
+        button = (InlineKeyboardButton(text=label, url=article_url, style="primary") if article_url
+                  else InlineKeyboardButton(text=label, callback_data=f"article:{product_id}:0", style="primary"))
+        rows.insert(1, [button])
     keyboard = InlineKeyboardMarkup(inline_keyboard=rows)
     image_path = product.get("image_path")
     photo = None
@@ -726,6 +733,40 @@ async def cb_product(callback: CallbackQuery):
         if p.is_file():
             photo = p
     await safe_edit_or_send(callback, text, reply_markup=keyboard, photo=photo)
+
+
+@dp.callback_query(F.data.startswith("article:"))
+async def cb_product_article(callback: CallbackQuery):
+    await callback.answer()
+    if not has_accepted_license(callback.from_user.id):
+        await show_license_gate(callback, callback.from_user.id)
+        return
+    try:
+        _, pid, index = callback.data.split(":")
+        pid, index = int(pid), int(index)
+    except (ValueError, TypeError):
+        return
+    product = get_product(pid)
+    if not product or not product.get("active", 1) or not is_article_product(pid):
+        await screen_reply(callback, tr(callback.from_user.id, "unavailable"), reply_markup=back_kb("catalog"))
+        return
+    pages = article_pages()
+    if not 0 <= index < len(pages):
+        return
+    lang = get_user_language(callback.from_user.id)
+    rows = []
+    nav = []
+    if index:
+        nav.append(InlineKeyboardButton(text="←", callback_data=f"article:{pid}:{index-1}", style="primary"))
+    if index + 1 < len(pages):
+        nav.append(InlineKeyboardButton(text="→", callback_data=f"article:{pid}:{index+1}", style="primary"))
+    if nav:
+        rows.append(nav)
+    back = {"ru": "← К товару", "en": "← Product", "uk": "← До товару"}[lang]
+    rows.append([InlineKeyboardButton(text=back, callback_data=f"product:{pid}", style="danger")])
+    counter = f"\n\n{index+1}/{len(pages)}" if len(pages) > 1 else ""
+    await screen_reply(callback, pages[index] + counter,
+                       reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
 
 
 def product_checkout_token(user, message, pid, token=None):
@@ -1897,6 +1938,7 @@ async def adm_product_open(callback: CallbackQuery):
             InlineKeyboardButton(text="💰 Цена", callback_data=f"adm:edit:{pid}:price"),
         ],
         [InlineKeyboardButton(text="📝 Описание", callback_data=f"adm:edit:{pid}:description")],
+        [InlineKeyboardButton(text="📄 Ссылка на статью", callback_data=f"adm:edit:{pid}:article_url", style="primary")],
         [InlineKeyboardButton(text="📦 Файл, версия и инструкция",callback_data=f"prodasset:view:{pid}",style="primary")],
         [InlineKeyboardButton(text="🏷 Скидка",callback_data=f"sale:product:{pid}",style="success")],
         [
@@ -1933,7 +1975,10 @@ async def adm_edit_field(callback: CallbackQuery, state: FSMContext):
     await state.update_data(product_id=pid, field=field)
     await state.set_state(ProductWizard.edit_value)
     await callback.answer()
-    await screen_reply(callback,f"Отправьте новое значение для «{field}» (Premium Emoji поддерживаются, или /cancel):")
+    if field == "article_url":
+        await screen_reply(callback, "Отправьте полную HTTPS-ссылку на статью. Для удаления ссылки отправьте -, для отмены /cancel.")
+    else:
+        await screen_reply(callback,f"Отправьте новое значение для «{field}» (Premium Emoji поддерживаются, или /cancel):")
 
 
 @dp.message(ProductWizard.edit_value, F.text)
@@ -1947,6 +1992,19 @@ async def adm_edit_value(message: Message, state: FSMContext):
     if field not in allowed:
         await state.clear()
         return
+    if field == "article_url":
+        value = (message.text or "").strip()
+        if value == "-":
+            value = ""
+        if value:
+            try:
+                parsed = urlsplit(value)
+                valid = parsed.scheme == "https" and parsed.hostname and not parsed.username and not parsed.password and not any(c.isspace() for c in value)
+            except ValueError:
+                valid = False
+            if not valid:
+                await screen_reply(message, "Нужна полная HTTPS-ссылка на статью, например https://telegra.ph/…")
+                return
     with db() as conn:
         conn.execute(f"UPDATE products SET {field}=? WHERE id=?", (value, pid))
         if field == "price":
@@ -2185,6 +2243,7 @@ async def main():
     from services.license_setup import setup_autostars
     setup_autostars()
     runner = await start_callback_server(bot)
+    article_task = asyncio.create_task(publication_worker(), name="autostars-telegraph")
     delivery_task = asyncio.create_task(retry_deliveries(bot), name="license-delivery")
     broadcast_task=asyncio.create_task(broadcast_worker(bot),name="broadcast-worker")
     payment_task = None
@@ -2199,6 +2258,8 @@ async def main():
     try:
         await dp.start_polling(bot)
     finally:
+        article_task.cancel()
+        await asyncio.gather(article_task, return_exceptions=True)
         broadcast_task.cancel()
         await asyncio.gather(broadcast_task,return_exceptions=True)
         delivery_task.cancel()

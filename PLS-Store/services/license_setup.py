@@ -4,6 +4,7 @@ from pathlib import Path
 from hashlib import sha256
 from services.db import db
 from services.licenses import audit
+from services.product_article import SHORT_DESCRIPTION
 
 ROOT = Path(__file__).resolve().parents[1]
 _PREVIOUS_BUNDLED_GUIDES = {
@@ -33,6 +34,18 @@ def setup_autostars():
             pid = conn.execute(
                 "INSERT INTO products(name,price,price_rub,description,version,active) VALUES('AutoStars','349₽ / Навсегда',349,'Автоматическая продажа Telegram Stars для FunPay Cardinal. Бессрочная лицензия на один аккаунт FunPay.','2.5.1',1)"
             ).lastrowid
+        if not conn.execute(
+            "SELECT 1 FROM bot_settings WHERE key='autostars_article_copy_v1'"
+        ).fetchone():
+            current = conn.execute("SELECT article_url FROM products WHERE id=?", (pid,)).fetchone()
+            conn.execute("UPDATE products SET description=? WHERE id=?", (SHORT_DESCRIPTION, pid))
+            for key, value in (
+                ('autostars_article_copy_v1', 'applied'),
+                ('autostars_article_product_id', str(pid)),
+                ('autostars_article_expected_url', current['article_url'] or ''),
+            ):
+                conn.execute("INSERT OR REPLACE INTO bot_settings(key,value) VALUES(?,?)", (key, value))
+            audit(conn, None, "setup", f"catalog:{pid}:article_copy")
         if not conn.execute(
             "SELECT 1 FROM bot_settings WHERE key='autostars_price_349_v1'"
         ).fetchone():
