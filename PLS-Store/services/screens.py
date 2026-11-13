@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import re
 from types import SimpleNamespace
 from weakref import WeakValueDictionary
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
@@ -71,7 +72,7 @@ def _back(chat_id):
     )
 
 
-async def _render(bot, chat, hint, text, markup, photo, kwargs, send):
+async def _render(bot, chat, hint, text, markup, photo, kwargs, send, force_new=False):
     if chat is None:
         return (await send())[-1]
     lock = _locks.setdefault(chat, asyncio.Lock())
@@ -160,7 +161,7 @@ async def _render(bot, chat, hint, text, markup, photo, kwargs, send):
             return content, pair
 
         try:
-            if old:
+            if old and not force_new:
                 current = old[-1]
                 photos = [r for r in old if r["kind"] == "photo"]
                 texts = [r for r in old if r["kind"] == "text"]
@@ -245,6 +246,14 @@ async def screen_reply(target, text, reply_markup=None, photo=None, **kwargs):
         if mid is not None and (is_callback or source_is_bot)
         else None
     )
+    command_text = getattr(message, "text", None)
+    force_new = (
+        not is_callback
+        and not source_is_bot
+        and isinstance(command_text, str)
+        and re.match(r"^/[A-Za-z0-9_]+(?:@[A-Za-z0-9_]+)?(?:\s|$)", command_text)
+        is not None
+    )
     options = dict(kwargs)
     options.setdefault("link_preview_options", NO_PREVIEW)
 
@@ -269,7 +278,9 @@ async def screen_reply(target, text, reply_markup=None, photo=None, **kwargs):
             return [banner, content]
         return [await message.answer(text, reply_markup=reply_markup, **options)]
 
-    return await _render(bot, chat, hint, text, reply_markup, photo, kwargs, send)
+    return await _render(
+        bot, chat, hint, text, reply_markup, photo, kwargs, send, force_new=force_new
+    )
 
 
 async def screen_send(bot, chat_id, text, **kwargs):

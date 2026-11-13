@@ -160,22 +160,43 @@ class ScreenTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.bot.messages), 1)
         self.assertEqual(len(self.bot.edits), 3)
 
-    async def test_command_errors_reuse_reply_without_deleting_user_commands(self):
+    async def test_each_command_sends_new_reply_without_deleting_user_commands(self):
         with patch.object(licenses, "ADMIN_ID", 10):
             for mid in (1, 2):
                 await licenses.admin_action(
                     ChatMessage(self.bot, 10, mid, "/license_action 13540460 reset")
                 )
-        self.assertEqual(len(self.bot.messages), 1)
+        self.assertEqual(len(self.bot.messages), 2)
+        self.assertEqual(self.bot.edits, [])
+        self.assertEqual(len(self.tracked()), 1)
         last = self.bot.messages[10, max(self.tracked())]
         self.assertIn("/license_action 1 reset", last.text)
         self.assertEqual(owned(self.lid, 10)["funpay_id"], "13540460")
 
-    async def test_persistent_screen_is_edited_from_different_command(self):
+    async def test_profile_command_starts_new_screen_then_buttons_edit_it(self):
         old = await screen_send(self.bot, 10, "Old")
-        new = await screen_reply(ChatMessage(self.bot, 10, 2, "/profile"), "New")
-        self.assertEqual(new.message_id, old.message_id)
-        self.assertEqual(old.text, "New")
+        new = await screen_reply(ChatMessage(self.bot, 10, 2, "/profile"), "Profile")
+        self.assertNotEqual(new.message_id, old.message_id)
+        self.assertEqual(old.text, "Old")
+        self.assertIn((10, old.message_id), self.bot.disabled)
+        await screen_reply(self.call(new, "licenses"), "Licenses")
+        self.assertEqual(new.text, "Licenses")
+        self.assertEqual(self.tracked(), {new.message_id})
+        self.assertEqual(len(self.bot.messages), 2)
+
+    async def test_regular_text_input_still_edits_current_screen(self):
+        old = await screen_send(self.bot, 10, "Enter price")
+        new = await screen_reply(ChatMessage(self.bot, 10, 2, "349"), "Saved")
+        self.assertEqual(old.message_id, new.message_id)
+        self.assertEqual(len(self.bot.messages), 1)
+
+    async def test_mentioned_command_with_arguments_also_sends_new_reply(self):
+        old = await screen_send(self.bot, 10, "Old")
+        new = await screen_reply(
+            ChatMessage(self.bot, 10, 2, "/license@PLSStore1_bot 1"), "Result"
+        )
+        self.assertNotEqual(old.message_id, new.message_id)
+        self.assertEqual(self.tracked(), {new.message_id})
 
     async def test_parallel_callbacks_reuse_same_message(self):
         old = await screen_reply(self.command, "Old")
