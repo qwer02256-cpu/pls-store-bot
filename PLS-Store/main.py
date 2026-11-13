@@ -331,7 +331,7 @@ for _lang, _texts in {'ru': {'plugins_title': '🧩 Плагины для FunPay
                          'Товар: <b>{product}</b>\n'
                          'Оплачено за товар: <b>{amount:.2f}₽</b>\n'
                          '\n'
-                         'Покупка сохранена. Файл, ключ и инструкция доступны в «Мои лицензии».'},
+                         'Покупка сохранена. Файл, ключ и инструкция доступны в «Лицензии».'},
  'uk': {'plugins_title': '🧩 Плагіни для FunPayCardinal',
         'purchase_method_choose': '💳 <b>Виберіть спосіб оплати</b>\n'
                                   '\n'
@@ -353,7 +353,7 @@ for _lang, _texts in {'ru': {'plugins_title': '🧩 Плагины для FunPay
                          'Товар: <b>{product}</b>\n'
                          'Сплачено за товар: <b>{amount:.2f}₽</b>\n'
                          '\n'
-                         'Покупку збережено. Файл, ключ та інструкція доступні в «Мої ліцензії».'},
+                         'Покупку збережено. Файл, ключ та інструкція доступні в «Ліцензії».'},
  'en': {'plugins_title': '🧩 Plugins for FunPayCardinal',
         'purchase_method_choose': '💳 <b>Choose a payment method</b>\n'
                                   '\n'
@@ -375,7 +375,7 @@ for _lang, _texts in {'ru': {'plugins_title': '🧩 Плагины для FunPay
                          'Product: <b>{product}</b>\n'
                          'Product price paid: <b>{amount:.2f}₽</b>\n'
                          '\n'
-                         'Purchase recorded. Your file, key and guide are available in My licenses.'}}.items():
+                         'Purchase recorded. Your file, key and guide are available in Licenses.'}}.items():
     I18N[_lang].update(_texts)
 
 I18N['ru']["license_title"] = '📄 <b>Документы PLS Store</b>\n━━━━━━━━━━━━━━━━━━━━\n\nПеред использованием магазина ознакомьтесь с документами по кнопкам ниже.\n\n📜 Прочитайте пользовательское соглашение, политику конфиденциальности и условия товаров и тарифов.\n\n✅ После ознакомления нажмите «Принимаю условия», чтобы продолжить.'
@@ -1150,7 +1150,7 @@ async def process_confirmed_payment(tx_id: str, data: dict, bot: Bot) -> bool:
             await bot.send_message(user_id,
                 tr(user_id, "purchase_paid", product=safe_stored_html(result["product_name"]), amount=amount),
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text={"ru":"🔑 Мои лицензии","uk":"🔑 Мої ліцензії","en":"🔑 My licenses"}[get_user_language(user_id)], callback_data="licenses")],
+                    [InlineKeyboardButton(text={"ru":"🔑 Лицензии","uk":"🔑 Ліцензії","en":"🔑 Licenses"}[get_user_language(user_id)], callback_data="licenses")],
                     [InlineKeyboardButton(text=tr(user_id, "home"), callback_data="home")],
                 ]))
         except Exception:
@@ -1347,6 +1347,7 @@ DESIGN_KEYS = [
     ("btn_support", "Кнопка Поддержка"),
     ("btn_topup", "Кнопка Пополнить"),
     ("btn_purchases", "Кнопка Мои покупки"),
+    ("btn_licenses", "Кнопка Лицензии"),
     ("btn_api", "Кнопка API"),
     ("btn_promo", "Кнопка Промокод"),
     ("btn_referral", "Кнопка Рефералка"),

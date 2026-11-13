@@ -22,13 +22,25 @@ log = logging.getLogger(__name__)
 def keyboard(rows):
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text=t, callback_data=d) for t, d in r] for r in rows
+            [
+                InlineKeyboardButton(
+                    text=t,
+                    callback_data=d,
+                    style=(
+                        "danger"
+                        if d in ("profile", "home", "licenses")
+                        else "success" if d.startswith("lic:download:") else "primary"
+                    ),
+                )
+                for t, d in r
+            ]
+            for r in rows
         ]
     )
 
 
 def title(uid):
-    return {"ru": "🔑 Мои лицензии", "en": "🔑 My licenses", "uk": "🔑 Мої ліцензії"}[
+    return {"ru": "🔑 Лицензии", "en": "🔑 Licenses", "uk": "🔑 Ліцензії"}[
         get_user_language(uid)
     ]
 
@@ -47,7 +59,7 @@ async def deliver(bot, lid, uid):
         data = asset(conn, row["product_id"])
     if not data:
         await bot.send_message(
-            uid, "Файл готовится продавцом. Лицензия сохранена в «Мои лицензии»."
+            uid, "Файл готовится продавцом. Лицензия сохранена в «Лицензии»."
         )
         return False
     from services.license_files import plugin_bytes
@@ -56,7 +68,7 @@ async def deliver(bot, lid, uid):
     await bot.send_message(
         uid,
         f"🔑 Бессрочная лицензия #{lid}\nКлюч: <code>{html.escape(row['license_key'])}</code>\nПривязка к FunPay при первом запуске.",
-        reply_markup=keyboard([[("Мои лицензии", "licenses")]]),
+        reply_markup=keyboard([[("Лицензии", "licenses")]]),
     )
     await bot.send_document(uid, BufferedInputFile(content, filename=filename))
     if filename == "AutoStars.py":
@@ -122,7 +134,8 @@ async def show_list(message, uid, page=0):
     if len(rows) > 20:
         buttons.append([("→", f"licenses:page:{page+1}")])
     await message.answer(
-        title(uid) if rows else title(uid) + "\nПока нет лицензий.",
+        f"<b>PLS Store</b>\n{title(uid)}\n━━━━━━━━━━━━━━━━━━━━\n\n"
+        + ("Выберите лицензию." if rows else "Пока нет лицензий."),
         reply_markup=keyboard(buttons + [[("← Профиль", "profile")]]),
     )
 
@@ -193,7 +206,7 @@ async def license_action(call, bot):
                         ("Инструкция", f"lic:guide:{lid}"),
                     ],
                     [("Запросить смену FunPay", f"lic:request:{lid}")],
-                    [("← Мои лицензии", "licenses")],
+                    [("← Лицензии", "licenses")],
                 ]
             ),
         )

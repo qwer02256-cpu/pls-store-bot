@@ -303,7 +303,9 @@ class LicenseTests(unittest.IsolatedAsyncioTestCase):
             row = conn.execute(
                 "SELECT * FROM products WHERE name='AutoStars'"
             ).fetchone()
-            self.assertEqual(row["active"], 0)
+            self.assertEqual(row["active"], 1)
+            self.assertEqual(row["price_rub"], 349)
+            self.assertEqual(row["price"], "349₽ / Навсегда")
             self.assertEqual(
                 conn.execute(
                     "SELECT count(*) FROM products WHERE name='AutoStars'"
@@ -311,11 +313,22 @@ class LicenseTests(unittest.IsolatedAsyncioTestCase):
                 1,
             )
             conn.execute(
+                "UPDATE products SET price='399₽',price_rub=399,active=0 WHERE id=?",
+                (row["id"],),
+            )
+            conn.execute(
                 "UPDATE license_assets SET instruction='custom' WHERE product_id=?",
                 (row["id"],),
             )
         setup_autostars()
         with db.db() as conn:
+            product = conn.execute(
+                "SELECT * FROM products WHERE id=?", (row["id"],)
+            ).fetchone()
+            self.assertEqual(
+                (product["price"], product["price_rub"], product["active"]),
+                ("399₽", 399, 0),
+            )
             self.assertEqual(
                 conn.execute(
                     "SELECT instruction FROM license_assets WHERE product_id=?",
@@ -323,6 +336,18 @@ class LicenseTests(unittest.IsolatedAsyncioTestCase):
                 ).fetchone()[0],
                 "custom",
             )
+
+    def test_existing_autostars_gets_approved_price_once(self):
+        with db.db() as conn:
+            conn.execute(
+                "INSERT INTO products(name,price,price_rub,description,active) VALUES('AutoStars','Цена не настроена',0,'d',0)"
+            )
+        setup_autostars()
+        with db.db() as conn:
+            row = conn.execute(
+                "SELECT * FROM products WHERE name='AutoStars'"
+            ).fetchone()
+            self.assertEqual((row["price_rub"], row["active"]), (349, 1))
 
     async def test_unprepared_product_never_creates_invoice(self):
         message = SimpleNamespace(answer=AsyncMock())

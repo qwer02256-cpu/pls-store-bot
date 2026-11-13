@@ -11,7 +11,7 @@ import shutil
 import datetime
 
 from telebot.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
-from telebot.types import InlineKeyboardMarkup as K, InlineKeyboardButton as B
+from telebot.types import InlineKeyboardMarkup as K, InlineKeyboardButton as _TelegramButton
 from telebot.apihelper import ApiTelegramException
 
 try:
@@ -29,6 +29,36 @@ import tg_bot.CBT as CBT
 
 if TYPE_CHECKING:
     from cardinal import Cardinal
+
+
+# PLS Store UI: shared blue/green actions and red navigation.
+# Serialize Bot API style ourselves to support older Cardinal pyTelegramBotAPI.
+class _PlsButton(_TelegramButton):
+    def to_dict(self):
+        data = super().to_dict()
+        data["style"] = self._pls_style
+        return data
+
+
+def B(text, *args, **kwargs):
+    style = kwargs.pop("style", None)
+    label = text.lower()
+    if style is None:
+        if any(word in label for word in ("назад", "домой", "отмена", "удалить", "выключить")) or text == "🗑":
+            style = "danger"
+        elif any(word in label for word in ("включить", "добавить", "создать", "подтверд", "сохранить", "отправить")):
+            style = "success"
+        else:
+            style = "primary"
+    button = _PlsButton(text, *args, **kwargs)
+    button._pls_style = style
+    return button
+
+
+def _pls_panel(text):
+    if text.startswith("<b>PLS Store"):
+        return text
+    return "<b>PLS Store · AutoStars</b>\n━━━━━━━━━━━━━━━━━━━━\n\n" + text
 
 
 # PLS_LICENSE_GUARD_V1: only key, FunPay account id and product leave this client.
@@ -508,6 +538,7 @@ def _state_on(v: bool) -> str:
     return "🟢 Включено" if v else "🔴 Выключено"
 
 def _safe_edit(bot, chat_id: Any, msg_id: int, text: str, kb=None):
+    text = _pls_panel(text)
     try:
         bot.edit_message_text(text, chat_id, msg_id, parse_mode="HTML", reply_markup=kb, disable_web_page_preview=True)
     except ApiTelegramException as e:
@@ -516,11 +547,12 @@ def _safe_edit(bot, chat_id: Any, msg_id: int, text: str, kb=None):
         raise
 
 def _about_text() -> str:
-    return (
-        f"🧩 <b>Плагин:</b> {NAME}\n"
-        f"📦 <b>Версия:</b> <code>{VERSION}</code>\n"
-        f"👤 <b>Автор:</b> {CREDITS}\n\n"
-        "Выберите раздел ниже."
+    return _pls_panel(
+        "⭐ <b>AutoStars</b>\n"
+        "Автоматическая продажа Telegram Stars\n\n"
+        f"📦 Версия: <code>{VERSION}</code>\n"
+        f"👤 Автор: {CREDITS}\n\n"
+        "Управляйте лотами, финансами и настройками по кнопкам ниже."
     )
 
 HELP_TEXT = """
@@ -671,9 +703,12 @@ def _proxy_text(chat_id: Any) -> str:
 # Кнопки Telegram
 def _home_kb() -> InlineKeyboardMarkup:
     kb = K()
-    kb.row(B("⚙️ Настройки", callback_data=CBT_SETTINGS),
-           B("📖 Инструкция", callback_data=CBT_HELP))
-    kb.add(B("◀️ Назад", callback_data=CBT_BACK_PLUGINS))
+    kb.row(B("⚙️ Настройки", callback_data=CBT_SETTINGS, style="primary"),
+           B("⭐ Лоты", callback_data=CBT_STARS, style="success"))
+    kb.row(B("💬 Сообщения", callback_data=CBT_MESSAGES, style="primary"),
+           B("📊 Финансы", callback_data=CBT_FINANCE, style="success"))
+    kb.row(B("📖 Инструкция", callback_data=CBT_HELP, style="primary"))
+    kb.add(B("« Назад к плагинам", callback_data=CBT_BACK_PLUGINS, style="danger"))
     return kb
 
 def _help_kb() -> InlineKeyboardMarkup:
@@ -769,6 +804,7 @@ def _proxy_kb(chat_id: Any) -> InlineKeyboardMarkup:
     return kb
 
 def _send_panel(bot, chat_id: Any, text: str, kb=None):
+    text = _pls_panel(text)
     try:
         bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=kb, disable_web_page_preview=True)
     except Exception as e:

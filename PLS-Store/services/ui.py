@@ -64,6 +64,7 @@ def main_menu_kb(lang: str = "ru") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [design_button("btn_profile", profile, "profile", "primary", profile), design_button("btn_shop", shop, "catalog", "success", shop)],
         [design_button("btn_language", language, "language", "primary", language), design_button("btn_faq", faq, "faq", "success", faq)],
+        [design_button("btn_licenses", "🔑 Лицензии", "licenses", "primary", {"ru":"🔑 Лицензии","en":"🔑 Licenses","uk":"🔑 Ліцензії"}.get(lang,"🔑 Лицензии"))],
         [support_button(lang)],
     ])
 
@@ -76,7 +77,7 @@ def profile_kb(lang: str = "ru") -> InlineKeyboardMarkup:
     }
     topup, purchases, api, promo, referral, back = labels.get(lang, labels["ru"])
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text={"ru":"🔑 Мои лицензии","en":"🔑 My licenses","uk":"🔑 Мої ліцензії"}.get(lang,"🔑 Мои лицензии"),callback_data="licenses")],
+        [design_button("btn_licenses", "🔑 Лицензии", "licenses", "primary", {"ru":"🔑 Лицензии","en":"🔑 Licenses","uk":"🔑 Ліцензії"}.get(lang,"🔑 Лицензии"))],
         [design_button("btn_topup", topup, "topup", "success", text_override=topup)],
         [design_button("btn_purchases", purchases, "mypurchases", "primary", text_override=purchases), design_button("btn_api", api, "api_info", "primary", text_override=api)],
         [design_button("btn_promo", promo, "promo", "primary", text_override=promo), design_button("btn_referral", referral, "referral", "primary", text_override=referral)],
