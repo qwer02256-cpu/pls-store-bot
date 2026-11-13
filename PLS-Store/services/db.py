@@ -191,6 +191,9 @@ def init_db() -> None:
             )
         """)
 
+        if 'kind' not in {r[1] for r in conn.execute('PRAGMA table_info(chat_screens)')}:
+            conn.execute("ALTER TABLE chat_screens ADD COLUMN kind TEXT NOT NULL DEFAULT 'unknown'")
+
         # seed default design texts if missing
         defaults = {
             "welcome_text": "<b>PLS Store</b>\n🏠 <b>Главное меню</b>\n━━━━━━━━━━━━━━━━━━━━\n\n👋 С возвращением, <b>{first_name}</b>.\n💲 Баланс: <b>{balance}₽</b>\n\nПлагины для FunPayCardinal",
