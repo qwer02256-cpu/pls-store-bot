@@ -81,7 +81,8 @@ from services.screens import screen_reply, screen_send
 from services.checkout_ui import quote_text, receipt_text, credit_text
 from services.payment_monitor import monitor_payments
 from services.payment_options import METHOD_FEES, method_info
-from services.documents import document_rows, DEFAULT_URLS, valid_url as valid_document_url
+from services.documents import (document_rows, DEFAULT_URLS, DOCUMENTS, REVISION as LEGAL_REVISION, document_url, document_pages, setup_documents, add_document_routes, valid_url as valid_document_url)
+from services.legal_publication import legal_publication_worker
 from services.ui import (
     main_menu_kb,
     profile_kb,
@@ -387,9 +388,9 @@ for _lang, _texts in {'ru': {'plugins_title': '🧩 Плагины для FunPay
                          'Purchase recorded. Your file, key and guide are available in Licenses.'}}.items():
     I18N[_lang].update(_texts)
 
-I18N['ru']["license_title"] = '📄 <b>Документы PLS Store</b>\n━━━━━━━━━━━━━━━━━━━━\n\nПеред использованием магазина ознакомьтесь с документами по кнопкам ниже.\n\n📜 Прочитайте пользовательское соглашение, политику конфиденциальности и условия товаров и тарифов.\n\n✅ После ознакомления нажмите «Принимаю условия», чтобы продолжить.'
-I18N['uk']["license_title"] = '📄 <b>Документи PLS Store</b>\n━━━━━━━━━━━━━━━━━━━━\n\nПеред використанням магазину ознайомтеся з документами за кнопками нижче.\n\n📜 Прочитайте угоду користувача, політику конфіденційності й умови товарів і тарифів.\n\n✅ Після ознайомлення натисніть «Приймаю умови», щоб продовжити.'
-I18N['en']["license_title"] = '📄 <b>PLS Store Documents</b>\n━━━━━━━━━━━━━━━━━━━━\n\nBefore using the store, open the documents using the buttons below.\n\n📜 Read the User Agreement, Privacy Policy, and Products and Pricing terms.\n\n✅ After reviewing them, press “I accept the terms” to continue.'
+I18N['ru']["license_title"] = '📄 <b>Документы PLS Store</b>\n━━━━━━━━━━━━━━━━━━━━\n\nПеред использованием магазина ознакомьтесь с документами по кнопкам ниже.\n\n📜 Прочитайте пользовательское и лицензионное соглашения, политику конфиденциальности и условия товаров и тарифов.\n\n✅ После ознакомления нажмите «Принимаю условия», чтобы продолжить.'
+I18N['uk']["license_title"] = '📄 <b>Документи PLS Store</b>\n━━━━━━━━━━━━━━━━━━━━\n\nПеред використанням магазину ознайомтеся з документами за кнопками нижче.\n\n📜 Прочитайте угоду користувача, ліцензійну угоду, політику конфіденційності й умови товарів і тарифів.\n\n✅ Після ознайомлення натисніть «Приймаю умови», щоб продовжити.'
+I18N['en']["license_title"] = '📄 <b>PLS Store Documents</b>\n━━━━━━━━━━━━━━━━━━━━\n\nBefore using the store, open the documents using the buttons below.\n\n📜 Read the User Agreement, License Agreement, Privacy Policy, and Products and Pricing terms.\n\n✅ After reviewing them, press “I accept the terms” to continue.'
 
 def tr(user_id: int, key: str, **kwargs) -> str:
     lang = get_user_language(user_id)
@@ -485,7 +486,7 @@ def build_product_caption(product, *, max_desc: int = 420, lang: str = "ru") -> 
     sale=percent(product.get('discount_percent',0))
     if sale:
         price=f"<s>{price}</s> → {product_price(product):.2f}₽ (−{sale:g}%)"
-    lines = [f"💎 <b>{name}</b>\n", f"<blockquote>{desc}</blockquote>\n"]
+    lines = [f"<b>{name}</b>\n", f"<blockquote>{desc}</blockquote>\n"]
     if product.get("article_url"):
         label = {"ru": "📄 Статья", "en": "📄 Article", "uk": "📄 Стаття"}.get(lang, "📄 Статья")
         link_text = {"ru": "жми", "en": "click", "uk": "тисни"}.get(lang, "жми")
@@ -500,6 +501,8 @@ def build_product_caption(product, *, max_desc: int = 420, lang: str = "ru") -> 
     license_text = get_setting("license_text", "")
     if license_text:
         lines.append(f"📜 {html.escape(license_text)}")
+    license_label = {"ru": "Лицензионное соглашение", "en": "License Agreement", "uk": "Ліцензійна угода"}.get(lang, "Лицензионное соглашение")
+    lines.append(f'<a href="{html.escape(document_url("license"), quote=True)}">📜 {license_label}</a>')
     return "\n".join(lines)
 
 
@@ -539,9 +542,9 @@ def has_accepted_license(user_id: int) -> bool:
 def accept_license(user_id: int) -> None:
     with db() as conn:
         conn.execute(
-            "INSERT INTO license_accepts(user_id) VALUES (?) "
-            "ON CONFLICT(user_id) DO UPDATE SET accepted_at=CURRENT_TIMESTAMP",
-            (user_id,),
+            "INSERT INTO license_accepts(user_id,documents_revision) VALUES (?,?) "
+            "ON CONFLICT(user_id) DO UPDATE SET accepted_at=CURRENT_TIMESTAMP,documents_revision=excluded.documents_revision",
+            (user_id, LEGAL_REVISION),
         )
 
 
@@ -597,12 +600,7 @@ async def render_plugins(target) -> None:
     else:
         builder = InlineKeyboardBuilder()
         for product in products:
-            ver = (product["version"] or "").strip() if product["version"] else ""
-            if ver:
-                ver_disp = ver if ver.lower().startswith("v") else f"v{ver}"
-                title = f"{plain_stored_text(product['name'])} {ver_disp} — {price_label(product)}"
-            else:
-                title = f"{plain_stored_text(product['name'])} — {price_label(product)}"
+            title = f"{plain_stored_text(product['name'])} — {price_label(product)}"
             builder.button(text=title[:64], callback_data=f"product:{product['id']}")
         builder.add(design_button("btn_back", tr(target.from_user.id, "back"), "catalog", "danger"))
         builder.adjust(1)
@@ -644,6 +642,12 @@ async def cmd_start(message: Message):
                         )
         except ValueError:
             pass
+    argument = (message.text or "").split(maxsplit=1)
+    if len(argument) == 2 and argument[1].startswith("doc_"):
+        key = argument[1][4:]
+        if key in DOCUMENTS:
+            await show_document(message, key, 0)
+            return
     if not has_accepted_license(message.from_user.id):
         await show_license_gate(message, message.from_user.id)
         return
@@ -1368,6 +1372,37 @@ async def cb_documents(callback: CallbackQuery):
     await safe_edit_or_send(callback, tr(callback.from_user.id, "documents"), reply_markup=InlineKeyboardMarkup(inline_keyboard=rows), photo=banner_path("documents", lang))
 
 
+async def show_document(target, key, index):
+    pages = document_pages(key)
+    if not 0 <= index < len(pages):
+        return
+    nav = []
+    if index:
+        nav.append(InlineKeyboardButton(text="←", callback_data=f"legal:{key}:{index-1}", style="primary"))
+    if index + 1 < len(pages):
+        nav.append(InlineKeyboardButton(text="→", callback_data=f"legal:{key}:{index+1}", style="primary"))
+    rows = [nav] if nav else []
+    back = "documents" if has_accepted_license(target.from_user.id) else "legal:gate"
+    lang = get_user_language(target.from_user.id)
+    rows.append([InlineKeyboardButton(text=tr(target.from_user.id, "back"), callback_data=back, style="danger")])
+    await screen_reply(target, pages[index] + f"\n\n{index+1}/{len(pages)}", reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+
+
+@dp.callback_query(F.data.startswith("legal:"))
+async def cb_legal_document(callback: CallbackQuery):
+    await callback.answer()
+    if callback.data == "legal:gate":
+        await show_license_gate(callback, callback.from_user.id)
+        return
+    try:
+        _, key, index = callback.data.split(":")
+        index = int(index)
+    except (ValueError, TypeError):
+        return
+    if key in DOCUMENTS:
+        await show_document(callback, key, index)
+
+
 # ─── support / reviews ──────────────────────────────────────────────────────
 def support_screen(user_id: int):
     support_username = get_setting("support_username", SUPPORT_USERNAME).lstrip("@")
@@ -1498,6 +1533,7 @@ DESIGN_KEYS = [
     ("document_privacy_url", "URL: политика конфиденциальности"),
     ("document_agreement_url", "URL: пользовательское соглашение"),
     ("document_terms_url", "URL: товары и тарифы"),
+    ("document_license_url", "URL: лицензионное соглашение"),
 ]
 
 
@@ -1546,7 +1582,7 @@ async def adm_design_save(message: Message, state: FSMContext):
     if not key:
         await state.clear()
         return
-    if key in {"document_privacy_url", "document_agreement_url", "document_terms_url"}:
+    if key in {"document_privacy_url", "document_agreement_url", "document_license_url", "document_terms_url"}:
         stored_value = (message.text or "").strip()
         if not valid_document_url(stored_value):
             await screen_reply(message,"Отправьте полную HTTPS-ссылку на документ, например https://telegra.ph/…")
@@ -2184,6 +2220,7 @@ async def start_callback_server(bot: Bot):
     app = web.Application(client_max_size=4096)
     from services.licenses import add_routes
     add_routes(app)
+    add_document_routes(app)
     app["bot"] = bot
     app.router.add_post("/platega/callback", platega_callback_handler)
     app.router.add_get("/platega/callback", payment_health_handler)
@@ -2238,8 +2275,10 @@ async def main():
         log.exception("commands setup failed")
     from services.license_setup import setup_autostars
     setup_autostars()
+    setup_documents()
     runner = await start_callback_server(bot)
     article_task = asyncio.create_task(publication_worker(), name="autostars-telegraph")
+    legal_task = asyncio.create_task(legal_publication_worker(), name="legal-telegraph")
     delivery_task = asyncio.create_task(retry_deliveries(bot), name="license-delivery")
     broadcast_task=asyncio.create_task(broadcast_worker(bot),name="broadcast-worker")
     payment_task = None
@@ -2254,6 +2293,8 @@ async def main():
     try:
         await dp.start_polling(bot)
     finally:
+        legal_task.cancel()
+        await asyncio.gather(legal_task, return_exceptions=True)
         article_task.cancel()
         await asyncio.gather(article_task, return_exceptions=True)
         broadcast_task.cancel()

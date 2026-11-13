@@ -208,6 +208,9 @@ def init_db() -> None:
             PRIMARY KEY(broadcast_id,user_id))""")
         conn.execute('CREATE INDEX IF NOT EXISTS broadcast_pending ON broadcast_recipients(status,next_attempt_at,broadcast_id)')
 
+        if 'documents_revision' not in {r[1] for r in conn.execute('PRAGMA table_info(license_accepts)')}:
+            conn.execute("ALTER TABLE license_accepts ADD COLUMN documents_revision TEXT NOT NULL DEFAULT ''")
+
         # seed default design texts if missing
         defaults = {
             "welcome_text": "<b>PLS Store</b>\n🏠 <b>Главное меню</b>\n━━━━━━━━━━━━━━━━━━━━\n\n👋 С возвращением, <b>{first_name}</b>.\n💲 Баланс: <b>{balance}₽</b>\n\nПлагины для FunPayCardinal",

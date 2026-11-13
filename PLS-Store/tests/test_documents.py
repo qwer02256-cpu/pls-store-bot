@@ -15,13 +15,13 @@ class DocumentTests(unittest.TestCase):
     def test_documents_are_always_available_without_optional_license_url(self):
         with patch('services.documents.get_setting',return_value=''),patch.object(main,'get_user_language',return_value='ru'):
             keyboard=main.license_gate_keyboard('',42)
-        self.assertEqual(len(keyboard.inline_keyboard),4)
-        self.assertEqual([row[0].url for row in keyboard.inline_keyboard[:3]],list(DEFAULT_URLS.values()))
+        self.assertEqual(len(keyboard.inline_keyboard),5)
+        self.assertEqual([row[0].url for row in keyboard.inline_keyboard[:4]],list(DEFAULT_URLS.values()))
         self.assertEqual(keyboard.inline_keyboard[-1][0].callback_data,'license:accept')
         self.assertEqual(keyboard.inline_keyboard[-1][0].style,'success')
 
     def test_invalid_config_is_replaced_and_valid_custom_agreement_is_shared(self):
-        settings={'document_privacy_url':'javascript:bad','license_url':'https://example.org/terms'}
+        settings={'document_privacy_url':'javascript:bad','document_agreement_url':'https://example.org/terms'}
         with patch('services.documents.get_setting',side_effect=lambda k,d='':settings.get(k,d)):
             rows=document_rows('en')
         self.assertEqual(rows[0][0].url,DEFAULT_URLS['privacy'])
@@ -29,12 +29,12 @@ class DocumentTests(unittest.TestCase):
         self.assertIn('User Agreement',rows[1][0].text)
 
     def test_first_entry_text_and_buttons_use_pack_emoji(self):
-        ids={'📄':'101','🔒':'102','📜':'103','💵':'104','✅':'105'}
+        ids={'📄':'101','🔒':'102','📜':'103','💵':'104','✅':'105','🔑':'106'}
         with patch('services.emoji.get_setting',return_value=json.dumps(ids)):
             middleware=PackEmojiMiddleware()
         with patch('services.documents.get_setting',return_value=''),patch.object(main,'get_user_language',return_value='ru'):
             markup=middleware.keyboard(main.license_gate_keyboard('',42))
-        self.assertEqual([r[0].icon_custom_emoji_id for r in markup.inline_keyboard],['102','103','104','105'])
+        self.assertEqual([r[0].icon_custom_emoji_id for r in markup.inline_keyboard],['102','103','106','104','105'])
         for lang in ('ru','uk','en'):
             self.assertIn('tg-emoji',middleware.render_html(main.I18N[lang]['license_title']))
 
@@ -48,7 +48,7 @@ class FirstEntryTests(unittest.IsolatedAsyncioTestCase):
             with patch.object(main,'safe_edit_or_send',AsyncMock()) as render,patch.object(main,'show_home',AsyncMock()) as home:
                 await main.cmd_start(message)
                 home.assert_not_awaited()
-                self.assertEqual(len(render.call_args.kwargs['reply_markup'].inline_keyboard),4)
+                self.assertEqual(len(render.call_args.kwargs['reply_markup'].inline_keyboard),5)
                 self.assertFalse(main.has_accepted_license(42))
                 callback=SimpleNamespace(from_user=actor,answer=AsyncMock())
                 await main.cb_license_accept(callback)
@@ -84,7 +84,7 @@ class FirstEntryTests(unittest.IsolatedAsyncioTestCase):
             message=SimpleNamespace(from_user=SimpleNamespace(id=42))
             with patch.object(main,'ADMIN_ID',42),patch.object(main,'safe_edit_or_send',AsyncMock()) as render:
                 await main.cmd_testdocs(message)
-            self.assertEqual(len(render.call_args.kwargs['reply_markup'].inline_keyboard),4)
+            self.assertEqual(len(render.call_args.kwargs['reply_markup'].inline_keyboard),5)
             self.assertTrue(main.has_accepted_license(42))
             with db.db() as conn:
                 self.assertEqual(conn.execute('SELECT accepted_at FROM license_accepts WHERE user_id=42').fetchone()[0],'2020-01-01 00:00:00')
