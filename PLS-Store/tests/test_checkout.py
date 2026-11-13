@@ -107,7 +107,7 @@ class CheckoutTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(await main.process_confirmed_payment('purchase',data,self.bot))
             self.assertFalse(await main.process_confirmed_payment('purchase',data,self.bot))
         self.assertEqual(self.bot.send_message.await_count,3)
-        self.assertEqual(self.bot.send_document.await_count,2)
+        self.assertEqual(self.bot.send_document.await_count,3)
         self.assertIn('Покупка оплачена',self.bot.send_message.await_args_list[1].args[1])
         self.assertNotIn('Баланс пополнен',self.bot.send_message.await_args_list[1].args[1])
 

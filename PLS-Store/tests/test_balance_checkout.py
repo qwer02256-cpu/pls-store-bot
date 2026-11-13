@@ -112,7 +112,7 @@ class BalanceCheckoutTests(unittest.IsolatedAsyncioTestCase):
             await main.cb_buy_balance(self.call, self.bot)
         self.assertEqual(self.balance(), 151)
         self.assertEqual(self.counts(), (1, 1, 1))
-        self.assertEqual(self.bot.send_document.await_count, 2)
+        self.assertEqual(self.bot.send_document.await_count, 3)
         with db.db() as conn:
             self.assertEqual(
                 conn.execute("SELECT count(*) FROM payments").fetchone()[0], 0

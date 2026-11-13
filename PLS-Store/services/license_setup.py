@@ -7,6 +7,7 @@ from services.licenses import audit
 
 ROOT = Path(__file__).resolve().parents[1]
 _PREVIOUS_BUNDLED_GUIDES = {
+    "dc1e7de752676901775d0bb7d9b14b42df0e85a346da80355c4ec85cd4e53260",
     "71329ee4081069c82deb88c1b9cc415ffdf83a05594a1689e4c7b33f4d9c1e36",
     "a8b49a0c8c5640cbb6eaed0eeb99570b490b57d8aea3a7ceb00084918857c474",
 }
@@ -51,14 +52,20 @@ def setup_autostars():
             )
             audit(conn, None, "setup", f"asset:{pid}:autostars")
 
-        # Only the bundled product follows the bundled file version automatically.
-        conn.execute(
-            "UPDATE products SET version='2.2' WHERE id=? AND EXISTS (SELECT 1 FROM license_assets WHERE product_id=? AND file_path='plugins/AutoStars.py')",
-            (pid, pid),
-        )
+        # Apply the built-in release once; later catalog version edits must persist.
+        if not conn.execute(
+            "SELECT 1 FROM bot_settings WHERE key='autostars_bundle_version_2_2'"
+        ).fetchone():
+            conn.execute(
+                "UPDATE products SET version='2.2' WHERE id=? AND (version IS NULL OR version IN ('','2.1','2.2')) AND EXISTS (SELECT 1 FROM license_assets WHERE product_id=? AND file_path='plugins/AutoStars.py')",
+                (pid, pid),
+            )
+            conn.execute(
+                "INSERT INTO bot_settings(key,value) VALUES('autostars_bundle_version_2_2','applied')"
+            )
 
         existing = conn.execute(
-            "SELECT instruction FROM license_assets WHERE product_id=? AND file_path='plugins/AutoStars.py'",
+            "SELECT instruction FROM license_assets WHERE product_id=?",
             (pid,),
         ).fetchone()
         if (
@@ -70,4 +77,4 @@ def setup_autostars():
                 "UPDATE license_assets SET instruction=? WHERE product_id=?",
                 ((ROOT / "docs/AUTOSTARS_INSTALL.txt").read_text(), pid),
             )
-            audit(conn, None, "setup", f"asset:{pid}:guide2.2")
+            audit(conn, None, "setup", f"asset:{pid}:functional_guide")

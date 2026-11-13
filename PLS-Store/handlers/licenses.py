@@ -29,7 +29,9 @@ def keyboard(rows):
                     callback_data=d,
                     style=(
                         "danger"
-                        if d
+                        if t.startswith("←")
+                        or t == "Отмена"
+                        or d
                         in ("profile", "home", "licenses", "adm:licenses", "adm:home")
                         or d.startswith(
                             ("admlic:block:", "admlic:reset:", "admlic:do_reset:")
@@ -65,7 +67,10 @@ async def deliver(bot, lid, uid):
     if not row or row["status"] != "active":
         return False
     with db() as conn:
-        data = asset(conn, row["product_id"])
+        data = conn.execute(
+            "SELECT a.*,p.name product_name,p.version product_version FROM license_assets a JOIN products p ON p.id=a.product_id WHERE a.product_id=?",
+            (row["product_id"],),
+        ).fetchone()
     if not data:
         await screen_send(
             bot, uid, "Файл готовится продавцом. Лицензия сохранена в «Лицензии»."
@@ -81,16 +86,22 @@ async def deliver(bot, lid, uid):
         reply_markup=keyboard([[("Лицензии", "licenses")]]),
     )
     await bot.send_document(uid, BufferedInputFile(content, filename=filename))
-    if filename == "AutoStars.py":
-        import json
-
-        await bot.send_document(
-            uid,
-            BufferedInputFile(
-                json.dumps({"key": row["license_key"]}).encode(),
-                filename="license.json",
-            ),
-        )
+    product_name = data["product_name"]
+    version = data["product_version"]
+    activation = (
+        "AutoStars: в Telegram-боте Cardinal откройте /autostars → Ввести ключ и отправьте строку PLS-… выше."
+        if filename == "AutoStars.py"
+        else "Установите плагин и введите ключ согласно INSTALL.txt."
+    )
+    key_document = (
+        f"PLS STORE — ЛИЦЕНЗИОННЫЙ КЛЮЧ\nТовар: {product_name}\nВерсия файла: {version or '—'}\n"
+        f"Лицензия: #{lid}, бессрочная\n\n{row['license_key']}\n\n"
+        f"{activation}\n"
+        "Это ключ плагина, не токен Fragment. Не публикуйте его. Подробная настройка функций — в INSTALL.txt.\n"
+    )
+    await bot.send_document(
+        uid, BufferedInputFile(key_document.encode("utf-8"), filename="LICENSE_KEY.txt")
+    )
     await bot.send_document(
         uid, BufferedInputFile(data["instruction"].encode(), filename="INSTALL.txt")
     )
@@ -493,6 +504,7 @@ async def logs(message):
 
 class Upload(StatesGroup):
     content = State()
+    version = State()
 
 
 @router.message(Command("license_file", "license_guide"))
@@ -537,6 +549,9 @@ async def upload(message, state: FSMContext, bot):
     if kind == "file" and (not doc or not (doc.file_name or "").endswith(".py")):
         await screen_reply(message, "Нужен файл .py")
         return
+    if kind == "guide" and doc and not (doc.file_name or "").lower().endswith(".txt"):
+        await screen_reply(message, "Для инструкции нужен файл .txt в UTF-8.")
+        return
     if doc and (
         not doc.file_size or doc.file_size > (2_000_000 if kind == "file" else 100_000)
     ):
@@ -544,26 +559,44 @@ async def upload(message, state: FSMContext, bot):
         return
     if kind == "file":
         import secrets
+        from services.product_assets import (
+            safe_filename,
+            normalize_source,
+            source_version,
+            publish_file,
+        )
 
+        with db() as conn:
+            product = conn.execute(
+                "SELECT * FROM products WHERE id=?", (pid,)
+            ).fetchone()
+            previous = asset(conn, pid)
+        if not product:
+            await screen_reply(message, "Товар не найден")
+            return
+        autostars = (
+            product["name"].replace(" ", "").lower() == "autostars"
+            or (previous and Path(previous["file_path"]).name == "AutoStars.py")
+            or doc.file_name == "AutoStars.py"
+        )
+        try:
+            filename = "AutoStars.py" if autostars else safe_filename(doc.file_name)
+        except ValueError as exc:
+            await screen_reply(message, str(exc))
+            return
         target = (
             DB_PATH.parent
             / "license_files"
             / str(pid)
             / secrets.token_hex(8)
-            / ("AutoStars.py" if doc.file_name == "AutoStars.py" else "plugin.py")
+            / filename
         )
         target.parent.mkdir(parents=True, exist_ok=True)
         await bot.download(doc, destination=target)
         try:
-            import ast
-
-            source = target.read_text(encoding="utf-8")
-            ast.parse(source)
-            if target.name == "AutoStars.py" and (
-                "PLS_LICENSE_GUARD_V1" not in source
-                or "__PLS_LICENSE_ENDPOINT__" not in source
-            ):
-                raise ValueError("AutoStars без проверки лицензии")
+            source = normalize_source(target.read_text(encoding="utf-8-sig"), autostars)
+            version = source_version(source)
+            target.write_text(source, encoding="utf-8")
         except (ValueError, SyntaxError, UnicodeError):
             target.unlink(missing_ok=True)
             await screen_reply(
@@ -572,10 +605,27 @@ async def upload(message, state: FSMContext, bot):
             )
             return
         value = str(target.resolve())
+        if version is None:
+            await state.set_state(Upload.version)
+            await state.update_data(pending_file=value)
+            await screen_reply(
+                message,
+                "Файл проверен. В нём не указана версия VERSION. Введите версию, например 2.3. До этого покупатели получают прежний файл.",
+                reply_markup=keyboard([[("Отмена", f"prodasset:view:{pid}")]]),
+            )
+            return
+        publish_file(pid, value, version, ADMIN_ID)
+        await state.clear()
+        await product_assets_card(
+            message,
+            pid,
+            f"Файл обновлён до версии {version}. Прежние покупатели смогут скачать его с тем же ключом.",
+        )
+        return
     else:
         try:
             value = (
-                (await bot.download(doc)).read().decode("utf-8")
+                (await bot.download(doc)).read().decode("utf-8-sig")
                 if doc
                 else (message.text or "")
             )
@@ -597,4 +647,117 @@ async def upload(message, state: FSMContext, bot):
         )
         audit(conn, None, ADMIN_ID, f"asset:{pid}:{kind}")
     await state.clear()
-    await screen_reply(message, "Сохранено. Для продажи нужны и файл, и инструкция.")
+    await product_assets_card(
+        message,
+        pid,
+        "TXT-инструкция обновлена. Для продажи нужны и файл, и инструкция.",
+    )
+
+
+async def product_assets_card(target, pid, note=""):
+    with db() as conn:
+        product = conn.execute("SELECT * FROM products WHERE id=?", (pid,)).fetchone()
+        data = asset(conn, pid)
+    if not product:
+        await screen_reply(target, "Товар не найден")
+        return
+    filename = (
+        Path(data["file_path"]).name if data and data["file_path"] else "не загружен"
+    )
+    text = (
+        f"📦 <b>{html.escape(product['name'])}</b>\n\nВерсия в каталоге: {html.escape(product['version'] or 'не указана')}\n"
+        f"Файл: {html.escape(filename)}\nTXT-инструкция: {'готова' if data and data['instruction'].strip() else 'не загружена'}\n\n"
+        "Выдача: файл плагина + LICENSE_KEY.txt + INSTALL.txt. Обновление файла доступно по прежним лицензиям."
+    )
+    if note:
+        text += "\n\n" + html.escape(note)
+    await screen_reply(
+        target,
+        text,
+        reply_markup=keyboard(
+            [
+                [("Обновить файл плагина", f"prodasset:file:{pid}")],
+                [
+                    ("Изменить версию", f"prodasset:version:{pid}"),
+                    ("Обновить TXT-инструкцию", f"prodasset:guide:{pid}"),
+                ],
+                [("Скачать инструкцию", f"prodasset:preview:{pid}")],
+                [("← Карточка товара", f"adm:p:{pid}")],
+            ]
+        ),
+    )
+
+
+@router.callback_query(F.data.startswith("prodasset:"))
+async def product_assets_action(call, state: FSMContext):
+    if call.from_user.id != ADMIN_ID:
+        await call.answer("Нет доступа", show_alert=True)
+        return
+    try:
+        _, action, raw = call.data.split(":")
+        pid = int(raw)
+    except (ValueError, TypeError):
+        await call.answer()
+        return
+    await call.answer()
+    with db() as conn:
+        exists = conn.execute("SELECT 1 FROM products WHERE id=?", (pid,)).fetchone()
+    if not exists:
+        await screen_reply(call, "Товар не найден")
+        return
+    await state.clear()
+    if action in ("file", "guide"):
+        await state.set_state(Upload.content)
+        await state.update_data(pid=pid, kind=action)
+        await screen_reply(
+            call,
+            (
+                "Отправьте новый .py файл. Версия VERSION будет прочитана автоматически, без запуска кода."
+                if action == "file"
+                else "Отправьте TXT-файл в UTF-8 с подробной установкой, подключением и настройкой функций плагина (до 100 КБ), либо текст инструкции."
+            ),
+            reply_markup=keyboard([[("Отмена", f"prodasset:view:{pid}")]]),
+        )
+        return
+    if action == "version":
+        await state.set_state(Upload.version)
+        await state.update_data(pid=pid)
+        await screen_reply(
+            call,
+            "Введите версию для каталога, например 2.3.",
+            reply_markup=keyboard([[("Отмена", f"prodasset:view:{pid}")]]),
+        )
+        return
+    if action == "preview":
+        with db() as conn:
+            data = asset(conn, pid)
+        if data and data["instruction"]:
+            await call.message.answer_document(
+                BufferedInputFile(
+                    data["instruction"].encode("utf-8"), filename="INSTALL.txt"
+                )
+            )
+    await product_assets_card(call, pid)
+
+
+@router.message(Upload.version)
+async def asset_version(message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    from services.product_assets import valid_version, publish_file
+
+    data = await state.get_data()
+    pid = data["pid"]
+    try:
+        version = valid_version(message.text or "")
+    except ValueError as exc:
+        await screen_reply(message, str(exc))
+        return
+    if data.get("pending_file"):
+        publish_file(pid, data["pending_file"], version, ADMIN_ID)
+    else:
+        with db() as conn:
+            conn.execute("UPDATE products SET version=? WHERE id=?", (version, pid))
+            audit(conn, None, ADMIN_ID, f"version:{pid}:{version}")
+    await state.clear()
+    await product_assets_card(message, pid, f"Версия {version} сохранена.")

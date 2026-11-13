@@ -1897,6 +1897,7 @@ async def adm_product_open(callback: CallbackQuery):
             InlineKeyboardButton(text="💰 Цена", callback_data=f"adm:edit:{pid}:price"),
         ],
         [InlineKeyboardButton(text="📝 Описание", callback_data=f"adm:edit:{pid}:description")],
+        [InlineKeyboardButton(text="📦 Файл, версия и инструкция",callback_data=f"prodasset:view:{pid}",style="primary")],
         [InlineKeyboardButton(text="🏷 Скидка",callback_data=f"sale:product:{pid}",style="success")],
         [
             InlineKeyboardButton(

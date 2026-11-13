@@ -573,7 +573,7 @@ def _pls_show_activation(cardinal, chat_id, msg_id=None, note=None):
         f"FunPay ID: <code>{_html.escape(fid) if fid else 'ожидается вход в FunPay'}</code>\n\n"
         "Для работы требуется бессрочный ключ из PLS Store → Лицензии.\n"
         "Нажмите «Ввести ключ» и отправьте его следующим сообщением. "
-        "Либо положите выданный license.json в storage/plugins/AutoStars/.\n\n"
+        "Либо создайте license.json в storage/plugins/AutoStars/ по инструкции.\n\n"
         "При проверке ключ привязывается к указанному FunPay ID. "
         "Без подтверждения лицензии отправка Stars недоступна."
     )

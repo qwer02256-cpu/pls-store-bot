@@ -201,8 +201,9 @@ class LicenseTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(await handlers.deliver(bot, self.lid, 10))
         self.assertEqual(bot.send_document.await_count, 6)
         docs = bot.send_document.await_args_list
-        self.assertEqual(json.loads(docs[1].args[1].data)["key"], self.key)
-        self.assertEqual(json.loads(docs[4].args[1].data)["key"], self.key)
+        self.assertIn(self.key, docs[1].args[1].data.decode("utf-8"))
+        self.assertEqual(docs[1].args[1].filename, "LICENSE_KEY.txt")
+        self.assertIn(self.key, docs[4].args[1].data.decode("utf-8"))
         self.assertIn(b"https://store.example/licenses/verify", docs[0].args[1].data)
         self.assertNotIn(b"__PLS_LICENSE_ENDPOINT__", docs[0].args[1].data)
         with db.db() as conn:
@@ -273,11 +274,18 @@ class LicenseTests(unittest.IsolatedAsyncioTestCase):
         )
         with patch.object(handlers, "ADMIN_ID", 1):
             await handlers.upload(message, state, Mock())
+            old_file = self.root / "old_plugin.py"
+            old_file.write_text("VERSION='1.0'")
+            with db.db() as conn:
+                conn.execute(
+                    "UPDATE license_assets SET file_path=? WHERE product_id=?",
+                    (str(old_file), self.pid),
+                )
             state.get_data.return_value = {"pid": self.pid, "kind": "file"}
             message.document = SimpleNamespace(file_name="plugin.py", file_size=12)
 
             async def download(doc, destination):
-                Path(destination).write_text("# new plugin")
+                Path(destination).write_text("# new plugin\nVERSION = '3.0'")
 
             bot = SimpleNamespace(download=AsyncMock(side_effect=download))
             with patch.object(handlers, "DB_PATH", self.root / "db.sqlite"):
@@ -287,7 +295,9 @@ class LicenseTests(unittest.IsolatedAsyncioTestCase):
                 "SELECT * FROM license_assets WHERE product_id=?", (self.pid,)
             ).fetchone()
             self.assertEqual(row["instruction"], "Detailed custom guide")
-            self.assertEqual(Path(row["file_path"]).read_text(), "# new plugin")
+            self.assertEqual(
+                Path(row["file_path"]).read_text(), "# new plugin\nVERSION = '3.0'"
+            )
             self.assertEqual(
                 conn.execute(
                     "SELECT count(*) FROM license_audit WHERE action LIKE 'asset:%'"
