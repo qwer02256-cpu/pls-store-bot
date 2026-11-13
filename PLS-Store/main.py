@@ -66,6 +66,7 @@ from services.db import (
     get_user_language,
     set_user_language,
 )
+from handlers.licenses import router as license_router, deliver, retry_deliveries
 from services.platega import PlategaClient, PlategaError
 from services.emoji import PackEmojiMiddleware
 from services.payment_ledger import settle_payment, money
@@ -330,7 +331,7 @@ for _lang, _texts in {'ru': {'plugins_title': '🧩 Плагины для FunPay
                          'Товар: <b>{product}</b>\n'
                          'Оплачено за товар: <b>{amount:.2f}₽</b>\n'
                          '\n'
-                         'Покупка сохранена в «Мои покупки». Продавцу отправлено уведомление.'},
+                         'Покупка сохранена. Файл, ключ и инструкция доступны в «Мои лицензии».'},
  'uk': {'plugins_title': '🧩 Плагіни для FunPayCardinal',
         'purchase_method_choose': '💳 <b>Виберіть спосіб оплати</b>\n'
                                   '\n'
@@ -352,7 +353,7 @@ for _lang, _texts in {'ru': {'plugins_title': '🧩 Плагины для FunPay
                          'Товар: <b>{product}</b>\n'
                          'Сплачено за товар: <b>{amount:.2f}₽</b>\n'
                          '\n'
-                         'Покупку збережено в «Мої покупки». Продавцю надіслано сповіщення.'},
+                         'Покупку збережено. Файл, ключ та інструкція доступні в «Мої ліцензії».'},
  'en': {'plugins_title': '🧩 Plugins for FunPayCardinal',
         'purchase_method_choose': '💳 <b>Choose a payment method</b>\n'
                                   '\n'
@@ -374,7 +375,7 @@ for _lang, _texts in {'ru': {'plugins_title': '🧩 Плагины для FunPay
                          'Product: <b>{product}</b>\n'
                          'Product price paid: <b>{amount:.2f}₽</b>\n'
                          '\n'
-                         'Recorded in My purchases. A notification has been sent to the seller.'}}.items():
+                         'Purchase recorded. Your file, key and guide are available in My licenses.'}}.items():
     I18N[_lang].update(_texts)
 
 I18N['ru']["license_title"] = '📄 <b>Документы PLS Store</b>\n━━━━━━━━━━━━━━━━━━━━\n\nПеред использованием магазина ознакомьтесь с документами по кнопкам ниже.\n\n📜 Прочитайте пользовательское соглашение, политику конфиденциальности и условия товаров и тарифов.\n\n✅ После ознакомления нажмите «Принимаю условия», чтобы продолжить.'
@@ -630,6 +631,7 @@ async def render_plugins(target) -> None:
 
 # ─── dispatcher ─────────────────────────────────────────────────────────────
 dp = Dispatcher(storage=MemoryStorage())
+dp.include_router(license_router)
 
 
 @dp.message(Command("testdocs"))
@@ -1010,6 +1012,13 @@ async def create_payment_invoice(message: Message, user, amount, bot: Bot, payme
     if amount < minimum:
         await message.answer(tr(user.id, "minimum", amount=float(minimum)))
         return
+    if product is not None:
+        from services.license_files import ready
+        with db() as conn:
+            available = ready(conn, product['id'])
+        if not available:
+            await message.answer('Товар готовится к автоматической выдаче. Файл, инструкция или адрес проверки ещё не настроены. Обратитесь в поддержку.')
+            return
     ensure_user(user.id, user.username, user.first_name)
     if not platega:
         await message.answer(
@@ -1130,11 +1139,18 @@ async def process_confirmed_payment(tx_id: str, data: dict, bot: Bot) -> bool:
     user_id = result["user_id"]
     amount = result["amount"]
     if result["purpose"] == "purchase":
+        with db() as conn:
+            license_row = conn.execute('SELECT id FROM licenses WHERE purchase_id=?', (result['purchase_id'],)).fetchone()
+        if license_row:
+            try:
+                await deliver(bot, license_row['id'], user_id)
+            except Exception as exc:
+                log.warning('License delivery pending: %s', type(exc).__name__)
         try:
             await bot.send_message(user_id,
                 tr(user_id, "purchase_paid", product=safe_stored_html(result["product_name"]), amount=amount),
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text=tr(user_id, "purchases").replace("<b>", "").replace("</b>", ""), callback_data="mypurchases")],
+                    [InlineKeyboardButton(text={"ru":"🔑 Мои лицензии","uk":"🔑 Мої ліцензії","en":"🔑 My licenses"}[get_user_language(user_id)], callback_data="licenses")],
                     [InlineKeyboardButton(text=tr(user_id, "home"), callback_data="home")],
                 ]))
         except Exception:
@@ -1263,6 +1279,7 @@ async def cb_reviews(callback: CallbackQuery):
 # ─── admin panel (extended) ─────────────────────────────────────────────────
 def admin_home_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔑 Лицензии", callback_data="adm:licenses")],
         [
             InlineKeyboardButton(text="🧩 Товары", callback_data="adm:products"),
             InlineKeyboardButton(text="➕ Добавить", callback_data="adm:add"),
@@ -2008,10 +2025,9 @@ async def payment_health_handler(request: web.Request):
 
 
 async def start_callback_server(bot: Bot):
-    if not PLATEGA_CALLBACK_BASE:
-        log.warning("PLATEGA_CALLBACK_BASE not set — callback server disabled")
-        return None
-    app = web.Application()
+    app = web.Application(client_max_size=4096)
+    from services.licenses import add_routes
+    add_routes(app)
     app["bot"] = bot
     app.router.add_post("/platega/callback", platega_callback_handler)
     app.router.add_get("/platega/callback", payment_health_handler)
@@ -2064,7 +2080,10 @@ async def main():
         await setup_bot_commands(bot)
     except Exception:
         log.exception("commands setup failed")
+    from services.license_setup import setup_autostars
+    setup_autostars()
     runner = await start_callback_server(bot)
+    delivery_task = asyncio.create_task(retry_deliveries(bot), name="license-delivery")
     payment_task = None
     if platega:
         async def on_confirmed(tx_id, data):
@@ -2077,6 +2096,8 @@ async def main():
     try:
         await dp.start_polling(bot)
     finally:
+        delivery_task.cancel()
+        await asyncio.gather(delivery_task, return_exceptions=True)
         if payment_task:
             payment_task.cancel()
             await asyncio.gather(payment_task, return_exceptions=True)

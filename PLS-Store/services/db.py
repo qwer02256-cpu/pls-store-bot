@@ -18,6 +18,8 @@ def db() -> sqlite3.Connection:
 def init_db() -> None:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     with db() as conn:
+        from services.licenses import migrate
+        migrate(conn)
         # --- existing tables (keep compatible) ---
         conn.execute("""
             CREATE TABLE IF NOT EXISTS products (

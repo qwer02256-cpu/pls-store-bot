@@ -59,6 +59,8 @@ def settle_payment(tx_id: str, data: dict):
                 'INSERT INTO purchases(user_id,product_id,price,product_name) VALUES(?,?,?,?)',
                 (user_id,row['product_id'],float(amount),row['product_name']),
             )
+            from services.licenses import issue
+            issue(conn,user_id,row["product_id"],purchase.lastrowid)
             conn.execute(
                 'UPDATE users SET total_spent=total_spent+?, purchases_count=purchases_count+1 WHERE user_id=?',
                 (float(amount),user_id),

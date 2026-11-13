@@ -20,10 +20,13 @@ class CheckoutTests(unittest.IsolatedAsyncioTestCase):
         with db.db() as conn:
             cur=conn.execute("INSERT INTO products(name,price,price_rub,description) VALUES('Plugin','299₽',299,'Description')")
             self.product_id=cur.lastrowid
+        plugin=Path(self.tmp.name)/'plugin.py';plugin.write_text('# fixture')
+        with db.db() as conn:
+            conn.execute('INSERT INTO license_assets VALUES(?,?,?)',(self.product_id,str(plugin),'Installation guide'))
         self.user=SimpleNamespace(id=2,username='buyer',first_name='Buyer')
         self.message=SimpleNamespace(answer=AsyncMock())
         self.callback=SimpleNamespace(from_user=self.user,message=self.message,answer=AsyncMock(),data='')
-        self.bot=SimpleNamespace(me=AsyncMock(return_value=SimpleNamespace(username='store_bot')),send_message=AsyncMock())
+        self.bot=SimpleNamespace(me=AsyncMock(return_value=SimpleNamespace(username='store_bot')),send_message=AsyncMock(),send_document=AsyncMock())
 
     def provider(self,tx='purchase'):
         return SimpleNamespace(create_payment=AsyncMock(return_value={'id':tx,'redirect':'https://app.platega.io/pay/'+tx,'status':'PENDING'}))
@@ -103,9 +106,10 @@ class CheckoutTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(main,'ADMIN_ID',42):
             self.assertTrue(await main.process_confirmed_payment('purchase',data,self.bot))
             self.assertFalse(await main.process_confirmed_payment('purchase',data,self.bot))
-        self.assertEqual(self.bot.send_message.await_count,2)
-        self.assertIn('Покупка оплачена',self.bot.send_message.await_args_list[0].args[1])
-        self.assertNotIn('Баланс пополнен',self.bot.send_message.await_args_list[0].args[1])
+        self.assertEqual(self.bot.send_message.await_count,3)
+        self.assertEqual(self.bot.send_document.await_count,2)
+        self.assertIn('Покупка оплачена',self.bot.send_message.await_args_list[1].args[1])
+        self.assertNotIn('Баланс пополнен',self.bot.send_message.await_args_list[1].args[1])
 
     async def test_hidden_product_cannot_create_new_invoice(self):
         with db.db() as conn:conn.execute('UPDATE products SET active=0 WHERE id=?',(self.product_id,))

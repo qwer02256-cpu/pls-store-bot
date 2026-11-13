@@ -46,3 +46,6 @@ try:
         ADMIN_ID = int(ADMIN_ID_RAW)
 except ValueError:
     pass
+
+# Public HTTPS origin routed by BotHost to the existing aiohttp port.
+LICENSE_PUBLIC_BASE = os.getenv('LICENSE_PUBLIC_BASE', PLATEGA_CALLBACK_BASE).strip().rstrip('/')
