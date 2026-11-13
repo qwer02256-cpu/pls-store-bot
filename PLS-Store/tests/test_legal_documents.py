@@ -183,6 +183,13 @@ class LegalDocumentsTests(unittest.IsolatedAsyncioTestCase):
         caption = main.build_product_caption(product)
         self.assertTrue(caption.startswith("<b>AutoStars</b>"))
         self.assertNotIn("💎", caption)
+        self.assertIn('>📄 Лицензионное соглашение</a>', caption)
+        from services.emoji import PackEmojiMiddleware
+        with patch('services.emoji.get_setting', return_value=json.dumps({'📄': '123456', '📜': '999999'})):
+            middleware = PackEmojiMiddleware()
+        rendered_footer = middleware.render_html(caption.splitlines()[-1])
+        self.assertIn('emoji-id="123456"', rendered_footer)
+        self.assertNotIn('emoji-id="999999"', rendered_footer)
         self.assertNotIn("💬", caption)
         self.assertNotIn("\n\n📜\n", caption)
         self.assertIn('жми</a>\n\n💰 Цена:', caption)
@@ -204,7 +211,7 @@ class LegalDocumentsTests(unittest.IsolatedAsyncioTestCase):
             pages = document_pages(key)
             self.assertTrue(all(len(page) < 3500 for page in pages))
             self.assertIn("Лицензионное соглашение", "\n".join(pages))
-            self.assertIn("13 ноября 2026", pages[0])
+            self.assertIn("14 ноября 2026", pages[0])
         license_text = json.dumps(DOCUMENTS["license"], ensure_ascii=False)
         for product_specific in ("AutoStars", "Tonhub", "Fragment", "24 слова"):
             self.assertNotIn(product_specific, license_text)

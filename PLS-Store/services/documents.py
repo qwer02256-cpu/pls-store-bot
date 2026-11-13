@@ -10,7 +10,7 @@ from aiohttp import web
 from config import LICENSE_PUBLIC_BASE
 from services.db import db, get_setting
 
-REVISION = "2026-11-13.2"
+REVISION = "2026-11-14"
 KEYS = ("privacy", "agreement", "license", "terms")
 ROOT = Path(__file__).resolve().parents[1] / "docs/legal"
 DOCUMENTS = {key: json.loads((ROOT / f"{key}.json").read_text()) for key in KEYS}
@@ -123,7 +123,7 @@ def setup_documents():
 def document_pages(key):
     document = DOCUMENTS[key]
     blocks = [
-        f'<b>{html.escape(document["title"])}</b>\nРедакция от 13 ноября 2026 года.'
+        f'<b>{html.escape(document["title"])}</b>\nРедакция от 14 ноября 2026 года.'
     ]
     for section in document["sections"]:
         blocks.append(f'<b>{html.escape(section["title"])}</b>')
@@ -147,7 +147,7 @@ def document_pages(key):
 
 def document_nodes(key):
     document = DOCUMENTS[key]
-    nodes = [{"tag": "p", "children": ["Редакция от 13 ноября 2026 года."]}]
+    nodes = [{"tag": "p", "children": ["Редакция от 14 ноября 2026 года."]}]
     for section in document["sections"]:
         nodes.append({"tag": "h3", "children": [section["title"]]})
         nodes.extend({"tag": "p", "children": [p]} for p in section["paragraphs"])
@@ -197,7 +197,7 @@ def document_html(key):
         + links
         + "</nav><h1>"
         + html.escape(document["title"])
-        + "</h1><p>Редакция от 13 ноября 2026 года.</p>"
+        + "</h1><p>Редакция от 14 ноября 2026 года.</p>"
         + body
         + "<footer><h2>Связанные документы</h2>"
         + links
