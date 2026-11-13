@@ -69,6 +69,26 @@ def normalize_source(source, autostars=False):
             '_PLS_ENDPOINT = "__PLS_LICENSE_ENDPOINT__"\n'
         ]
         source = "".join(lines)
+        if "_PLS_GRACE_SECONDS" in source:
+            public_node = next(
+                (
+                    n
+                    for n in ast.parse(source).body
+                    if isinstance(n, ast.Assign)
+                    and any(
+                        isinstance(t, ast.Name) and t.id == "_PLS_PUBLIC_KEY"
+                        for t in n.targets
+                    )
+                ),
+                None,
+            )
+            if public_node is None:
+                raise ValueError("Отсутствует ключ проверки подтверждения лицензии")
+            lines = source.splitlines(keepends=True)
+            lines[public_node.lineno - 1 : public_node.end_lineno] = [
+                '_PLS_PUBLIC_KEY = "__PLS_LEASE_PUBLIC_KEY__"\n'
+            ]
+            source = "".join(lines)
         ast.parse(source)
     return source
 

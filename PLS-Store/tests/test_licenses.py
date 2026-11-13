@@ -400,6 +400,13 @@ class LicenseTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(("POST", "/platega/callback"), routes)
 
 
+from plugin_lease_support import (
+    GUARD_NAMES,
+    defaults as guard_defaults,
+    payload as lease_payload,
+)
+
+
 class PluginGuardTests(unittest.TestCase):
     def setUp(self):
         tree = ast.parse(
@@ -408,21 +415,25 @@ class PluginGuardTests(unittest.TestCase):
         nodes = [
             n
             for n in tree.body
-            if isinstance(n, ast.FunctionDef) and n.name == "_pls_require_license"
+            if isinstance(n, ast.FunctionDef) and n.name in GUARD_NAMES
         ]
         import threading
 
-        self.path = Mock()
-        self.path.return_value.read_text.return_value = json.dumps(
-            {
-                "key": "PLS-" + "a" * 43,
-                "seed": "never send",
-                "fragment_jwt": "never send",
-            }
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.path = self.root / "storage/plugins/AutoStars/license.json"
+        self.path.parent.mkdir(parents=True)
+        self.key = "PLS-" + "a" * 43
+        self.path.write_text(
+            json.dumps(
+                {"key": self.key, "seed": "never send", "fragment_jwt": "never send"}
+            )
         )
         self.requests = Mock()
         self.requests.post.return_value = SimpleNamespace(
-            status_code=200, json=lambda: {"valid": True}
+            status_code=200,
+            json=lambda: lease_payload(self.key, "123", int(self.clock())),
         )
         self.clock = Mock(return_value=1000)
         self.env = dict(
@@ -430,11 +441,12 @@ class PluginGuardTests(unittest.TestCase):
             _PLS_LOCK=threading.Lock(),
             _PLS_CHECKED=0.0,
             _PLS_ACCOUNT=None,
-            _PlsPath=self.path,
+            _PlsPath=lambda p: self.root / p,
             _PLS_ENDPOINT="https://store.example/licenses/verify",
             requests=self.requests,
-            _pls_time=SimpleNamespace(monotonic=self.clock),
+            _pls_time=SimpleNamespace(monotonic=self.clock, time=self.clock),
         )
+        self.env.update(guard_defaults())
         exec(
             compile(ast.Module(body=nodes, type_ignores=[]), "<guard>", "exec"),
             self.env,

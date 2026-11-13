@@ -13,6 +13,13 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 
+from plugin_lease_support import (
+    GUARD_NAMES,
+    defaults as guard_defaults,
+    payload as lease_payload,
+)
+
+
 class ActivationTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -38,12 +45,13 @@ class ActivationTests(unittest.TestCase):
             "init_cardinal",
             "_toggle_plugin",
         }
+        names.update(GUARD_NAMES)
         nodes = [
             n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name in names
         ]
         self.requests = Mock()
         self.requests.post.return_value = SimpleNamespace(
-            status_code=200, json=lambda: {"valid": True}
+            status_code=200, json=lambda: lease_payload(self.key, "123", 1000)
         )
         self.bot = Mock()
         self.cardinal = SimpleNamespace(
@@ -67,7 +75,7 @@ class ActivationTests(unittest.TestCase):
             _PlsPath=lambda p: self.root / p,
             _PLS_ENDPOINT="https://store.example/licenses/verify",
             requests=self.requests,
-            _pls_time=SimpleNamespace(monotonic=lambda: 1000),
+            _pls_time=SimpleNamespace(monotonic=lambda: 1000, time=lambda: 1000),
             _fsm={},
             VERSION="2.2",
             NAME="AutoStars",
@@ -86,6 +94,7 @@ class ActivationTests(unittest.TestCase):
             _get_proxies_for_chat=Mock(return_value=None),
             FRAGMENT_ORDER_STARS="https://fragment.example/order",
         )
+        self.env.update(guard_defaults())
         future = ast.ImportFrom(
             module="__future__", names=[ast.alias(name="annotations")], level=0
         )

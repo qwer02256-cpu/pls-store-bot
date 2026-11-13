@@ -155,6 +155,9 @@ async def verify(request):
             return web.json_response(
                 {"valid": False}, status=403, headers={"Cache-Control": "no-store"}
             )
+    from services.license_leases import sign_lease
+
     return web.json_response(
-        {"valid": True, "perpetual": True}, headers={"Cache-Control": "no-store"}
+        dict(valid=True, perpetual=True, **sign_lease(key, str(int(fid)))),
+        headers={"Cache-Control": "no-store"},
     )

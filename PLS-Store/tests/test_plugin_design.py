@@ -53,7 +53,12 @@ class DesignTests(unittest.TestCase):
             for n in tree.body
             if isinstance(n, (ast.ClassDef, ast.FunctionDef)) and n.name in names
         ]
-        env = {"_TelegramButton": LegacyButton, "VERSION": "2.1", "CREDITS": "@author"}
+        env = {
+            "_TelegramButton": LegacyButton,
+            "VERSION": "2.1",
+            "CREDITS": "@author",
+            "_PLS_MODE": "online",
+        }
         exec(compile(ast.Module(body=nodes, type_ignores=[]), "<ui>", "exec"), env)
         for text, style in [
             ("⚙️ Настройки", "primary"),

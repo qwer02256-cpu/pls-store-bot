@@ -38,6 +38,10 @@ def plugin_bytes(file_path):
             '"__PLS_LICENSE_ENDPOINT__"',
             json.dumps(LICENSE_PUBLIC_BASE + "/licenses/verify"),
         )
+        if '"__PLS_LEASE_PUBLIC_KEY__"' in source:
+            from services.license_leases import public_key
+
+            source = source.replace('"__PLS_LEASE_PUBLIC_KEY__"', repr(public_key()))
         ast.parse(source)
     return path.name, source.encode("utf-8")
 

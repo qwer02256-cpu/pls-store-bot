@@ -65,39 +65,249 @@ def _pls_panel(text):
 import threading as _pls_threading
 import time as _pls_time
 from pathlib import Path as _PlsPath
+import base64 as _pls_base64
+import hashlib as _pls_hashlib
+import hmac as _pls_hmac
+import math as _pls_math
+from requests.exceptions import RequestException as _PlsNetworkError
 
 _PLS_ENDPOINT = "__PLS_LICENSE_ENDPOINT__"
 _PLS_LOCK = _pls_threading.Lock()
 _PLS_CHECKED = 0.0
 _PLS_ACCOUNT = None
 
+_PLS_PUBLIC_KEY = "__PLS_LEASE_PUBLIC_KEY__"
+_PLS_GRACE_SECONDS = 12 * 60 * 60
+_PLS_KEY_FP = None
+_PLS_VALID_UNTIL = 0
+_PLS_MODE = 'none'
+_PLS_LAST_WALL = 0
+
+
+def _pls_clear_memory():
+    global _PLS_CHECKED, _PLS_ACCOUNT, _PLS_KEY_FP, _PLS_VALID_UNTIL, _PLS_MODE, _PLS_LAST_WALL
+    _PLS_CHECKED = 0.0
+    _PLS_ACCOUNT = None
+    _PLS_KEY_FP = None
+    _PLS_VALID_UNTIL = 0
+    _PLS_MODE = "none"
+    _PLS_LAST_WALL = 0
+
+
+def _pls_store_status(data):
+    path = _PlsPath("storage/plugins/AutoStars/license_status.json")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".json.tmp")
+    fd = os.open(str(temporary), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as output:
+            json.dump(data, output)
+        os.chmod(str(temporary), 0o600)
+        os.replace(str(temporary), str(path))
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _pls_verify_approval(pack, fp, fid, now):
+    try:
+        approval = pack["approval"]
+        signature = pack["signature"]
+        if not isinstance(approval, dict) or set(approval) != {
+            "v",
+            "product",
+            "fingerprint",
+            "funpay_id",
+            "issued_at",
+            "expires_at",
+        }:
+            return False
+        if (
+            approval["v"] != 1
+            or approval["product"] != "autostars"
+            or approval["fingerprint"] != fp
+            or approval["funpay_id"] != fid
+        ):
+            return False
+        issued = approval["issued_at"]
+        expires = approval["expires_at"]
+        if (
+            type(issued) is not int
+            or type(expires) is not int
+            or expires - issued != _PLS_GRACE_SECONDS
+            or issued > now + 300
+            or now >= expires
+        ):
+            return False
+        if (
+            not isinstance(signature, str)
+            or len(signature) > 1024
+            or not isinstance(_PLS_PUBLIC_KEY, dict)
+        ):
+            return False
+        n = int(_PLS_PUBLIC_KEY["n"])
+        e = int(_PLS_PUBLIC_KEY["e"])
+        if not 2048 <= n.bit_length() <= 4096 or e != 65537:
+            return False
+        raw = _pls_base64.b64decode(signature, validate=True)
+        size = (n.bit_length() + 7) // 8
+        if len(raw) != size or int.from_bytes(raw, "big") >= n:
+            return False
+        body = json.dumps(
+            approval, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+        ).encode("ascii")
+        digest = (
+            bytes.fromhex("3031300d060960864801650304020105000420")
+            + _pls_hashlib.sha256(body).digest()
+        )
+        expected = b"\x00\x01" + b"\xff" * (size - len(digest) - 3) + b"\x00" + digest
+        actual = pow(int.from_bytes(raw, "big"), e, n).to_bytes(size, "big")
+        return _pls_hmac.compare_digest(actual, expected)
+    except (ValueError, TypeError, KeyError, OverflowError):
+        return False
+
+
+def _pls_remember(fid, fp, now, expires, mode):
+    global _PLS_CHECKED, _PLS_ACCOUNT, _PLS_KEY_FP, _PLS_VALID_UNTIL, _PLS_MODE, _PLS_LAST_WALL
+    _PLS_ACCOUNT = fid
+    _PLS_KEY_FP = fp
+    _PLS_CHECKED = _pls_time.monotonic()
+    _PLS_VALID_UNTIL = expires
+    _PLS_MODE = mode
+    _PLS_LAST_WALL = now
+
+
+def _pls_deny(fp, fid):
+    _pls_clear_memory()
+    try:
+        _pls_store_status(dict(denied=True, fingerprint=fp, funpay_id=fid))
+    except OSError:
+        try:
+            _PlsPath("storage/plugins/AutoStars/license_status.json").unlink(
+                missing_ok=True
+            )
+        except OSError:
+            pass
+
+
+def _pls_cached_approval(fp, fid, now):
+    try:
+        pack = json.loads(
+            _PlsPath("storage/plugins/AutoStars/license_status.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        last_seen = pack["last_seen"]
+        if (
+            pack.get("denied")
+            or pack.get("endpoint") != _PLS_ENDPOINT
+            or type(last_seen) not in (int, float)
+            or not _pls_math.isfinite(last_seen)
+            or now < last_seen - 300
+            or not _pls_verify_approval(pack, fp, fid, now)
+        ):
+            return None
+        pack["last_seen"] = max(last_seen, now)
+        # A read-only cache cannot provide a reliable persisted denial/clock marker.
+        _pls_store_status(pack)
+        return pack
+    except (OSError, ValueError, TypeError, KeyError):
+        return None
+
+
 def _pls_require_license(cardinal):
-    global _PLS_CHECKED, _PLS_ACCOUNT
+    global _PLS_LAST_WALL
     fid = str(getattr(cardinal.account, "id", "") or "")
     if not fid.isascii() or not fid.isdigit() or int(fid) <= 0:
-        raise RuntimeError("AutoStars: FunPay ID ещё недоступен. Дождитесь входа Cardinal в FunPay.")
+        raise RuntimeError(
+            "AutoStars: FunPay ID ещё недоступен. Дождитесь входа Cardinal в FunPay."
+        )
     if not _PLS_ENDPOINT.startswith("https://"):
-        raise RuntimeError("AutoStars: адрес проверки не настроен. Скачайте плагин через раздел «Лицензии» в PLS Store.")
+        raise RuntimeError(
+            "AutoStars: адрес проверки не настроен. Скачайте плагин через раздел «Лицензии» в PLS Store."
+        )
     with _PLS_LOCK:
-        if fid == _PLS_ACCOUNT and _pls_time.monotonic() - _PLS_CHECKED < 60:
-            return
         try:
-            settings = json.loads(_PlsPath("storage/plugins/AutoStars/license.json").read_text(encoding="utf-8"))
-            key = settings["key"]
+            key = json.loads(
+                _PlsPath("storage/plugins/AutoStars/license.json").read_text(
+                    encoding="utf-8"
+                )
+            )["key"]
             if not isinstance(key, str) or not key.startswith("PLS-"):
                 raise ValueError()
-            # No plugin config, Fragment credentials, mnemonic or wallet information.
-            response = requests.post(_PLS_ENDPOINT,
+        except (OSError, ValueError, TypeError, KeyError):
+            _pls_clear_memory()
+            raise RuntimeError(
+                "AutoStars: введите лицензионный ключ в /autostars."
+            ) from None
+        fp = _pls_hashlib.sha256(key.encode()).hexdigest()
+        now = _pls_time.time()
+        if (
+            fid == _PLS_ACCOUNT
+            and fp == _PLS_KEY_FP
+            and _pls_time.monotonic() - _PLS_CHECKED < 60
+            and now < _PLS_VALID_UNTIL
+            and now >= _PLS_LAST_WALL - 300
+        ):
+            _PLS_LAST_WALL = max(now, _PLS_LAST_WALL)
+            return
+        transient = False
+        pack = None
+        try:
+            response = requests.post(
+                _PLS_ENDPOINT,
                 json={"key": key, "funpay_id": fid, "product": "autostars"},
-                timeout=(5, 10), allow_redirects=False)
-            if response.status_code != 200 or response.json().get("valid") is not True:
-                raise ValueError()
-        except Exception:
-            _PLS_CHECKED = 0.0
-            _PLS_ACCOUNT = None
-            raise RuntimeError("AutoStars: лицензия не подтверждена. Проверьте ключ, доступ к PLS Store и привязку FunPay. Продажа остановлена.") from None
-        _PLS_ACCOUNT = fid
-        _PLS_CHECKED = _pls_time.monotonic()
+                timeout=(5, 10),
+                allow_redirects=False,
+            )
+        except (_PlsNetworkError, OSError):
+            transient = True
+        else:
+            if (
+                response.status_code in (404, 408, 429)
+                or 500 <= response.status_code <= 599
+            ):
+                transient = True
+            elif response.status_code == 200:
+                try:
+                    pack = response.json()
+                except ValueError:
+                    transient = True
+                if (
+                    not transient
+                    and isinstance(pack, dict)
+                    and pack.get("valid") is True
+                    and _pls_verify_approval(pack, fp, fid, now)
+                ):
+                    state = dict(
+                        approval=pack["approval"],
+                        signature=pack["signature"],
+                        endpoint=_PLS_ENDPOINT,
+                        last_seen=now,
+                    )
+                    try:
+                        _pls_store_status(state)
+                    except OSError:
+                        pass
+                    _pls_remember(
+                        fid, fp, now, pack["approval"]["expires_at"], "online"
+                    )
+                    return
+            if not transient:
+                # Includes explicit rejection, wrong account, and an invalid signature.
+                # Such replies invalidate offline approval rather than enabling grace.
+                _pls_deny(fp, fid)
+                raise RuntimeError(
+                    "AutoStars: сервер не подтвердил лицензию. Проверьте статус, ключ и FunPay ID. Льготный период при отказе не действует."
+                )
+        if transient:
+            state = _pls_cached_approval(fp, fid, now)
+            if state is not None:
+                _pls_remember(fid, fp, now, state["approval"]["expires_at"], "grace")
+                return
+        _pls_clear_memory()
+        raise RuntimeError(
+            "AutoStars: сервер проверки недоступен, а действующего подтверждения за последние 12 часов нет. Отправка Stars остановлена."
+        )
 
 # ========================================================================
 # 1. НАСТРОЙКИ ЛОГИРОВАНИЯ
@@ -142,7 +352,7 @@ def _log(level: str, msg: str):
 # 2. МЕТАДАННЫЕ ПЛАГИНА И КОНСТАНТЫ
 # ========================================================================
 NAME        = "AutoStars"
-VERSION     = "2.2"
+VERSION     = "2.3"
 DESCRIPTION = "Плагин по продаже звезд."
 CREDITS     = "@uservkru"
 UUID        = "fa0c2f3a-7a85-4c09-a3b2-9f3a9b8f8a75"
@@ -565,7 +775,20 @@ def _pls_show_activation(cardinal, chat_id, msg_id=None, note=None):
         and _PLS_CHECKED > 0
         and _pls_time.monotonic() - _PLS_CHECKED < 60
     )
-    status = "✅ подтверждена" if active else "🔒 требуется проверка"
+    active = active and _pls_time.time() < _PLS_VALID_UNTIL
+    status = (
+        (
+            "🕒 временный режим: сервер недоступен"
+            if _PLS_MODE == "grace"
+            else "✅ подтверждена"
+        )
+        if active
+        else "🔒 требуется проверка"
+    )
+    if active and _PLS_MODE == "grace":
+        status += (
+            f" (осталось {max(0,int((_PLS_VALID_UNTIL-_pls_time.time())/60))} мин.)"
+        )
     saved = "сохранён" if _pls_has_key() else "не введён"
     text = (
         f"🔑 <b>Лицензия AutoStars</b> · v{VERSION}\n\n"
@@ -698,9 +921,13 @@ def _about_text() -> str:
     return _pls_panel(
         "⭐ <b>AutoStars</b>\n"
         "Автоматическая продажа Telegram Stars\n\n"
-        f"📦 Версия: <code>{VERSION}</code> · PLS-LIC-2.2\n"
-        "🔑 Лицензия: подтверждена\n"
-        f"👤 Автор: {CREDITS}\n\n"
+        f"📦 Версия: <code>{VERSION}</code> · PLS-LIC-2.3\n"
+        + (
+            "🔑 Лицензия: временная работа до восстановления связи (до 12 часов)\n"
+            if _PLS_MODE == "grace"
+            else "🔑 Лицензия: подтверждена\n"
+        )
+        + f"👤 Автор: {CREDITS}\n\n"
         "Управляйте лотами, финансами и настройками по кнопкам ниже."
     )
 
@@ -2194,7 +2421,7 @@ def init_cardinal(cardinal: Cardinal):
     except Exception:
         pass
 
-    logger.info(f"Загружен {NAME} v{VERSION} [PLS-LIC-2.2]. Продажа требует подтверждённой лицензии.")
+    logger.info(f"Загружен {NAME} v{VERSION} [PLS-LIC-2.3]. Продажа требует подтверждённой лицензии.")
     if not _pls_has_key():
         logger.warning("AutoStars: ключ не введён. Откройте /autostars в Telegram-боте Cardinal для активации.")
 
