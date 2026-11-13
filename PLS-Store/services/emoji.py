@@ -32,6 +32,7 @@ BUTTON_EMOJI = {
 ALIASES = {
     "🆔": "👤", "💲": "💰", "💸": "🧾", "💬": "🎧",
     "🗓": "📅", "☑": "✅",
+    "📜": "📄",  # Use the published animated document when no scroll was uploaded.
 }
 
 

@@ -486,7 +486,7 @@ def build_product_caption(product, *, max_desc: int = 420, lang: str = "ru") -> 
     sale=percent(product.get('discount_percent',0))
     if sale:
         price=f"<s>{price}</s> → {product_price(product):.2f}₽ (−{sale:g}%)"
-    lines = [f"<b>{name}</b>\n", f"<blockquote>{desc}</blockquote>\n"]
+    lines = [f"<b>{name}</b>", f"<blockquote>{desc}</blockquote>"]
     if product.get("article_url"):
         label = {"ru": "📄 Статья", "en": "📄 Article", "uk": "📄 Стаття"}.get(lang, "📄 Статья")
         link_text = {"ru": "жми", "en": "click", "uk": "тисни"}.get(lang, "жми")
@@ -496,14 +496,14 @@ def build_product_caption(product, *, max_desc: int = 420, lang: str = "ru") -> 
     lines.append(f"💰 {'Price' if lang == 'en' else 'Цена'}: <b>{price}</b>")
     reviews_url = get_setting("reviews_url", REVIEWS_URL)
     reviews_label = get_setting("reviews_label", "Отзывы · Клик")
-    if reviews_url:
+    if reviews_url and re.search(r"\w", plain_stored_text(reviews_label)):
         lines.append(f'💬 <a href="{html.escape(reviews_url)}">{html.escape(reviews_label)}</a>')
     license_text = get_setting("license_text", "")
-    if license_text:
+    if re.search(r"\w", plain_stored_text(license_text)):
         lines.append(f"📜 {html.escape(license_text)}")
     license_label = {"ru": "Лицензионное соглашение", "en": "License Agreement", "uk": "Ліцензійна угода"}.get(lang, "Лицензионное соглашение")
     lines.append(f'<a href="{html.escape(document_url("license"), quote=True)}">📜 {license_label}</a>')
-    return "\n".join(lines)
+    return "\n\n".join(lines)
 
 
 # ─── FSM ────────────────────────────────────────────────────────────────────

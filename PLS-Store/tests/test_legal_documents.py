@@ -176,9 +176,17 @@ class LegalDocumentsTests(unittest.IsolatedAsyncioTestCase):
         setup_autostars()
         pid = int(db.get_setting("autostars_article_product_id"))
         product = db.get_product(pid)
+        db.set_setting("reviews_url", "https://example.org/reviews")
+        db.set_setting("reviews_label", " ")
+        db.set_setting("license_text", "📜")
+        product["article_url"] = "https://telegra.ph/Example-article"
         caption = main.build_product_caption(product)
         self.assertTrue(caption.startswith("<b>AutoStars</b>"))
         self.assertNotIn("💎", caption)
+        self.assertNotIn("💬", caption)
+        self.assertNotIn("\n\n📜\n", caption)
+        self.assertIn('жми</a>\n\n💰 Цена:', caption)
+        self.assertIn('</b>\n\n<a href=', caption)
         self.assertIn("Лицензионное соглашение</a>", caption.splitlines()[-1])
         self.assertIn(
             document_url("license").replace("&", "&amp;"), caption.splitlines()[-1]
@@ -197,7 +205,10 @@ class LegalDocumentsTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(all(len(page) < 3500 for page in pages))
             self.assertIn("Лицензионное соглашение", "\n".join(pages))
             self.assertIn("13 ноября 2026", pages[0])
-        self.assertIn("24", json.dumps(DOCUMENTS["license"], ensure_ascii=False))
+        license_text = json.dumps(DOCUMENTS["license"], ensure_ascii=False)
+        for product_specific in ("AutoStars", "Tonhub", "Fragment", "24 слова"):
+            self.assertNotIn(product_specific, license_text)
+        self.assertIn("всему соответствующему ассортименту", license_text)
 
     def test_one_time_link_update_keeps_operator_edits(self):
         for key in KEYS:

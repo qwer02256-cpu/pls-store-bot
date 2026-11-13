@@ -10,7 +10,7 @@ from aiohttp import web
 from config import LICENSE_PUBLIC_BASE
 from services.db import db, get_setting
 
-REVISION = "2026-11-13"
+REVISION = "2026-11-13.2"
 KEYS = ("privacy", "agreement", "license", "terms")
 ROOT = Path(__file__).resolve().parents[1] / "docs/legal"
 DOCUMENTS = {key: json.loads((ROOT / f"{key}.json").read_text()) for key in KEYS}

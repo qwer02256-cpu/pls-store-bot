@@ -27,6 +27,10 @@ class EmojiTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('href="https://example.org/👤"', rendered)
         self.assertIn('<tg-emoji emoji-id="999">👤</tg-emoji>', rendered)
         self.assertIn('emoji-id="666"', self.mw.render_html('💲 Баланс'))
+        with patch('services.emoji.get_setting', return_value=json.dumps({'📄': '123456'})):
+            document_middleware = PackEmojiMiddleware()
+        footer = '<a href="https://example.org/license">📜 Лицензионное соглашение</a>'
+        self.assertIn('<tg-emoji emoji-id="123456">', document_middleware.render_html(footer))
 
     def test_buttons_preserve_url_color_and_custom_label(self):
         markup = InlineKeyboardMarkup(inline_keyboard=[[
