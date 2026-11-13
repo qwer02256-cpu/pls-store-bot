@@ -9,6 +9,7 @@ import re as _re
 import html as _html
 import shutil
 import datetime
+import unicodedata as _seed_unicode
 
 from telebot.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from telebot.types import InlineKeyboardMarkup as K, InlineKeyboardButton as _TelegramButton
@@ -352,7 +353,7 @@ def _log(level: str, msg: str):
 # 2. МЕТАДАННЫЕ ПЛАГИНА И КОНСТАНТЫ
 # ========================================================================
 NAME        = "AutoStars"
-VERSION     = "2.3"
+VERSION     = "2.4"
 DESCRIPTION = "Плагин по продаже звезд."
 CREDITS     = "@uservkru"
 UUID        = "fa0c2f3a-7a85-4c09-a3b2-9f3a9b8f8a75"
@@ -548,7 +549,318 @@ def _get_proxies_for_chat(chat_id: Any) -> Optional[dict]:
             if isinstance(p, str) and p: return {"http": p, "https": p}
     return None
 
+
+# Separate provider: BIP39-12 / Tonkeeper V5R1. Credentials never enter licensing calls.
+_SPACE_BASE = "https://api.fragment-api.space"
+_SPACE_LOCK = _pls_threading.RLock()
+
+
+def _space_path(name):
+    return os.path.join(PLUGIN_FOLDER, name)
+
+
+def _space_read(name):
+    try:
+        with open(_space_path(name), encoding="utf-8") as stream:
+            result = json.load(stream)
+        if not isinstance(result, dict):
+            raise ValueError("Invalid local state")
+        return result
+    except FileNotFoundError:
+        return {}
+
+
+def _space_write(name, data):
+    # Atomic, private file; a persistence failure must prevent purchases.
+    path = _space_path(name)
+    temporary = path + ".tmp"
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as stream:
+        os.chmod(temporary, 0o600)
+        json.dump(data, stream, ensure_ascii=False)
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(temporary, path)
+
+
+def _space_enabled(chat_id):
+    return _get_cfg_for_orders(chat_id).get("fragment_provider") == "space"
+
+
+def _space_account(address):
+    """Compare account identity, allowing bounceable/non-bounceable TON forms."""
+    if _re.fullmatch(r"-?\d+:[0-9a-fA-F]{64}", address):
+        workchain, account = address.split(":")
+        return int(workchain), bytes.fromhex(account)
+    raw = _pls_base64.urlsafe_b64decode(address)
+    if len(raw) != 36 or raw[0] & 0x7f not in (0x11, 0x51):
+        raise ValueError("Invalid TON address")
+    return int.from_bytes(raw[1:2], "big", signed=True), raw[2:34]
+
+
+def _space_pending():
+    return {
+        "ok": False,
+        "pending": True,
+        "status": 0,
+        "text": "Результат покупки требует проверки. Повторная оплата и автовозврат заблокированы.",
+    }
+
+
+def _space_purchase(username, quantity, chat_id, order_id):
+    # Serialize submissions and reserve the FunPay order on disk BEFORE any HTTP.
+    # A lost response has no safe replay: only poll a saved request_id.
+    if not order_id:
+        return _space_pending()
+    owner = _owner_key(chat_id)
+    key = str(order_id)
+    try:
+        with _SPACE_LOCK:
+            orders = _space_read("provider_orders.json")
+            record = orders.get(key)
+            if record and (
+                record.get("username") != username.lstrip("@")
+                or record.get("quantity") != quantity
+            ):
+                return _space_pending()
+            if record and record.get("state") == "completed":
+                return {"ok": True, "status": 200, "text": "", "json": {}}
+            if not record:
+                credentials = _space_read("wallet_credentials.json").get(str(owner))
+                if not credentials:
+                    return _space_pending()
+                record = {
+                    "state": "submitting",
+                    "username": username.lstrip("@"),
+                    "quantity": quantity,
+                    "chat_id": str(chat_id),
+                    "owner": str(owner),
+                }
+                orders[key] = record
+                _space_write("provider_orders.json", orders)
+                payload = dict(
+                    credentials,
+                    username="@" + username.lstrip("@"),
+                    amount=int(quantity),
+                    payment_method="ton",
+                )
+                response = requests.post(
+                    _SPACE_BASE + "/api/v1/stars/buy",
+                    json=payload,
+                    timeout=90,
+                    allow_redirects=False,
+                    proxies=_get_proxies_for_chat(chat_id),
+                )
+                data = response.json()
+                body = data.get("data") if isinstance(data, dict) else None
+                request_id = body.get("request_id") if isinstance(body, dict) else None
+                if (
+                    not 200 <= response.status_code < 300
+                    or data.get("success") is not True
+                    or not isinstance(request_id, str)
+                    or not _re.fullmatch(r"[A-Za-z0-9_-]{1,150}", request_id)
+                ):
+                    record["state"] = "review"
+                    _space_write("provider_orders.json", orders)
+                    return _space_pending()
+                record.update(request_id=request_id, state="queued")
+                _space_write("provider_orders.json", orders)
+            request_id = record.get("request_id")
+            if not request_id:
+                return _space_pending()
+        # Polling is read-only, and can resume after restart or another '+' message.
+        for attempt in range(15):
+            response = requests.get(
+                _SPACE_BASE + "/api/v1/queue/" + request_id,
+                timeout=15,
+                allow_redirects=False,
+                proxies=_get_proxies_for_chat(chat_id),
+            )
+            data = response.json()
+            body = data.get("data") if isinstance(data, dict) else None
+            state = body.get("status") if isinstance(body, dict) else None
+            if response.status_code != 200 or data.get("success") is not True:
+                return _space_pending()
+            if state == "completed":
+                result = body.get("result") or {}
+                nested = result.get("data") if isinstance(result, dict) else None
+                if (
+                    not isinstance(result, dict)
+                    or result.get("success") is False
+                    or (isinstance(nested, dict) and nested.get("success") is False)
+                ):
+                    return _space_pending()
+                with _SPACE_LOCK:
+                    orders = _space_read("provider_orders.json")
+                    orders[key]["state"] = "completed"
+                    _space_write("provider_orders.json", orders)
+                return {"ok": True, "status": 200, "text": "", "json": {}}
+            if state not in ("queued", "processing"):
+                return _space_pending()
+            if attempt < 14:
+                _pls_time.sleep(2)
+    except Exception:
+        # Never log requests, response bodies or exception text: may contain seed.
+        logger.warning(
+            "AutoStars: provider order requires reconciliation; no automatic retry"
+        )
+    return _space_pending()
+
+
+def _space_notified(order_id):
+    with _SPACE_LOCK:
+        orders = _space_read("provider_orders.json")
+        if str(order_id) in orders:
+            orders[str(order_id)]["notified"] = True
+            _space_write("provider_orders.json", orders)
+
+
+def _space_orders_panel(bot, call):
+    bot.answer_callback_query(call.id)
+    with _SPACE_LOCK:
+        records = _space_read("provider_orders.json")
+        rows = [
+            (oid, rec)
+            for oid, rec in records.items()
+            if rec.get("owner") == str(call.message.chat.id)
+        ]
+    lines = ["Запросы Fragment API Space (последние 20):"]
+    for oid, rec in rows[-20:]:
+        lines.append(
+            f"FunPay #{oid}: {rec.get('state')} · request_id={rec.get('request_id') or 'ответ потерян; нужна ручная сверка'}"
+        )
+    lines.append(
+        "Покупатель может отправить + для проверки существующего запроса. При потерянном ответе сверьте историю TON и обратитесь в поддержку API. Не удаляйте журнал для повторной покупки."
+    )
+    bot.send_message(call.message.chat.id, "\n".join(lines))
+
+
+def _start_space(bot, call):
+    bot.answer_callback_query(call.id)
+    _fsm[call.message.chat.id] = {"step": "space_consent"}
+    bot.send_message(
+        call.message.chat.id,
+        "Tonkeeper: 12 слов BIP39, V5R1 (также 24 слова TON).\n\n"
+        "Независимый сервис api.fragment-api.space получит seed и сможет распоряжаться средствами. "
+        "Это не официальный сервис Telegram. Используйте отдельный рабочий кошелёк с небольшой суммой. "
+        "Seed сохранится на хостинге Cardinal в закрытом файле; на сервер лицензий он не отправляется. "
+        "Действуют комиссии и ограничения сервиса.\n\n"
+        "Для согласия отправьте ПОДКЛЮЧИТЬ, для отмены /cancel.",
+        reply_markup=_kb_cancel_fsm(),
+    )
+
+
+def _space_fsm(message, cardinal, state):
+    bot = cardinal.telegram.bot
+    chat_id = message.chat.id
+    text = (message.text or "").strip()
+    if text.lower() in ("/cancel", "cancel", "отмена"):
+        _fsm.pop(chat_id, None)
+        bot.send_message(chat_id, "Подключение отменено.")
+        return
+    if state["step"] == "space_consent":
+        if text.upper() != "ПОДКЛЮЧИТЬ":
+            bot.send_message(chat_id, "Отправьте ПОДКЛЮЧИТЬ или /cancel.")
+            return
+        state["step"] = "space_address"
+        bot.send_message(
+            chat_id,
+            "Скопируйте публичный TON-адрес из Tonkeeper → Получить. Это нужно для проверки правильного кошелька.",
+        )
+        return
+    if state["step"] == "space_address":
+        if not _extract_wallet_address({"address": text}):
+            bot.send_message(
+                chat_id,
+                "Не распознан TON-адрес. Скопируйте адрес полностью или /cancel.",
+            )
+            return
+        state.update(wallet_address=text, step="space_seed")
+        bot.send_message(
+            chat_id,
+            "Введите 12 или 24 слова в исходном порядке. Сообщение будет удалено по возможности. Не присылайте их поддержке или в магазин. /cancel — отмена.",
+        )
+        return
+    try:
+        bot.delete_message(chat_id, message.message_id)
+    except Exception:
+        pass
+    try:
+        words = _parse_mnemonic(text)
+    except ValueError as exc:
+        bot.send_message(chat_id, str(exc))
+        return
+    payload = {
+        "seed": _pls_base64.b64encode(" ".join(words).encode()).decode(),
+        "wallet_address": state["wallet_address"],
+    }
+    # Do not retain the phrase in FSM or ordinary settings.
+    try:
+        response = requests.post(
+            _SPACE_BASE + "/api/v1/wallet/resolve",
+            json=payload,
+            timeout=60,
+            allow_redirects=False,
+            proxies=_get_proxies_for_chat(chat_id),
+        )
+        raw = response.json()
+        data = raw.get("data") if isinstance(raw, dict) else None
+        index = data.get("account_index") if isinstance(data, dict) else None
+        if (
+            not 200 <= response.status_code < 300
+            or raw.get("success") is not True
+            or not isinstance(data, dict)
+            or not _extract_wallet_address(data)
+            or (
+                len(words) == 12
+                and (type(index) is not int or not 0 <= index <= 2147483647)
+            )
+        ):
+            raise ValueError("Wallet resolution failed")
+        if _space_account(_extract_wallet_address(data)) != _space_account(state["wallet_address"]):
+            raise ValueError("Wallet address mismatch")
+        if len(words) == 12 and (
+            data.get("wallet_version", "").lower() != "v5r1"
+            or data.get("seed_format") != "bip39-12"
+        ):
+            raise ValueError("Unsupported mnemonic type")
+        if type(index) is int and 0 <= index <= 2147483647:
+            payload["account_index"] = index
+        with _SPACE_LOCK:
+            credentials = _space_read("wallet_credentials.json")
+            credentials[str(chat_id)] = payload
+            _space_write("wallet_credentials.json", credentials)
+        _set_cfg(
+            chat_id,
+            fragment_provider="space",
+            fragment_jwt="space-wallet",
+            wallet_version=data.get("wallet_version"),
+            wallet_address=state["wallet_address"],
+            mnemonic_word_count=len(words),
+            balance_ton=None,
+            last_wallet_raw=None,
+            lots_active=False,
+            plugin_enabled=False,
+        )
+    except Exception:
+        _fsm.pop(chat_id, None)
+        bot.send_message(
+            chat_id,
+            "Кошелёк не подключён: проверьте доступность сервиса, адрес и тип кошелька. Для 12 слов нужен BIP39 V5R1. Фраза не сохранена в состоянии диалога. Начните подключение заново.",
+        )
+        return
+    _fsm.pop(chat_id, None)
+    bot.send_message(
+        chat_id,
+        "Кошелёк проверен и подключён. Сверьте адрес в разделе подключения. Доступ к средствам есть у выбранного API. Автоматическая выдача включается отдельно в настройках. Баланс смотрите в Tonkeeper.",
+    )
+    _send_panel(bot, chat_id, _token_text(chat_id), _token_kb())
+
+
 def _check_username_exists(username: str, jwt: Optional[str], chat_id: Any = None) -> bool:
+    if _space_enabled(chat_id):
+        # This API validates the recipient at purchase; no invented lookup route.
+        return _validate_username(username)
     if not username:
         return False
     uname = username.lstrip("@").strip()
@@ -615,6 +927,8 @@ def _extract_wallet_info(data: dict) -> tuple[Optional[str], Optional[float]]:
     return ver, bal
 
 def _check_fragment_wallet(jwt: str, chat_id: Any = None) -> tuple[Optional[str], Optional[float], Optional[dict]]:
+    if _space_enabled(chat_id):
+        return _get_cfg_for_orders(chat_id).get("wallet_version"), None, None
     proxies = _get_proxies_for_chat(chat_id)
     try:
         r = requests.get(
@@ -630,8 +944,12 @@ def _check_fragment_wallet(jwt: str, chat_id: Any = None) -> tuple[Optional[str]
         logger.warning(f"Fragment wallet check failed: {e}")
         return None, None, None
 
-def _order_stars(jwt: str, username: str, quantity: int, show_sender: bool = False, webhook_url: Optional[str] = None, chat_id: Any = None) -> dict:
+def _order_stars(jwt: str, username: str, quantity: int, show_sender: bool = False, webhook_url: Optional[str] = None, chat_id: Any = None, order_id: Any = None) -> dict:
     _pls_require_license(_CARDINAL_REF)
+    with _SPACE_LOCK:
+        existing_space_order = str(order_id) in _space_read("provider_orders.json")
+    if existing_space_order or _space_enabled(chat_id):
+        return _space_purchase(username, quantity, chat_id, order_id)
     proxies = _get_proxies_for_chat(chat_id)
     try:
         u = username.lstrip("@").strip()
@@ -689,34 +1007,218 @@ def _order_stars(jwt: str, username: str, quantity: int, show_sender: bool = Fal
         _log("error", f"SEND exception: {e}")
         return {"ok": False, "status": 0, "text": str(e), "json": None}
 
-def _authenticate_fragment(api_key: str, phone_number: str, version: str, mnemonics: List[str], chat_id: Any = None) -> tuple[Optional[str], Optional[dict], int]:
+def _parse_mnemonic(value):
+    """Normalize formatting only; never pad words or invent a derivation standard."""
+    if isinstance(value, str):
+        normalized = _seed_unicode.normalize("NFKD", value).lower()
+        normalized = _re.sub(r"(?m)^\s*\d{1,2}[.)]\s*", "", normalized)
+        words = normalized.split()
+    elif isinstance(value, (list, tuple)) and all(isinstance(w, str) for w in value):
+        words = [_seed_unicode.normalize("NFKD", w).strip().lower() for w in value]
+    else:
+        raise ValueError("Нужны 12 или 24 английских слова в исходном порядке.")
+    if len(words) not in (12, 24):
+        raise ValueError(
+            f"Нужно 12 или 24 слова; получено {len(words)}. Не дописывайте и не повторяйте слова."
+        )
+    if any(_re.fullmatch(r"[a-z]+", w) is None for w in words):
+        raise ValueError(
+            "Используйте только английские слова, разделённые пробелами или переносами строк. Не присылайте скриншот или пароль."
+        )
+    return words
+
+
+def _fragment_auth_error(data, status, count):
+    """Only fixed messages leave this function: provider validation may echo seeds."""
+    try:
+        lower = json.dumps(data, ensure_ascii=False).lower()
+    except (ValueError, TypeError):
+        lower = ""
+    if status == 429 or "too many login attempts" in lower:
+        match = _re.search(r"\bin\s+(\d+)\s+seconds?", lower)
+        wait = int(match.group(1)) if match else None
+        message = "Слишком много попыток авторизации. Дождитесь ограничения провайдера и повторите запрос."
+        if wait is not None:
+            message = f"Слишком много попыток авторизации. Подождите {wait} секунд и повторите запрос."
+        return dict(code="rate_limit", safe_message=message, retry_after=wait)
+    if status in (400, 422) and any(
+        tag in lower for tag in ("mnemonic", "seed", "24 words", "24 слов")
+    ):
+        message = (
+            f"Fragment API отклонил фразу из {count} слов. Проверьте порядок слов и поддержку стандарта кошелька провайдером. "
+            "Плагин не дописывает фразу до 24 слов. Для 12-словного BIP39-кошелька поддержка должна быть на стороне API."
+        )
+        return dict(code="mnemonic_rejected", safe_message=message)
+    if status in (401, 403):
+        return dict(
+            code="credentials_rejected",
+            safe_message="Fragment API отклонил авторизацию. Проверьте API-ключ и доступ у провайдера; лицензия PLS Store здесь не используется.",
+        )
+    if any(tag in lower for tag in ("confirm", "подтверд", "verification code")):
+        return dict(
+            code="confirmation_required",
+            safe_message="Провайдер запросил подтверждение входа. Подтвердите его в своём Telegram, затем нажмите «Я подтвердил вход».",
+        )
+    return dict(
+        code="auth_rejected",
+        safe_message=f"Fragment API не выдал токен (HTTP {status}). Фраза передана в исходной длине — {count} слов. Проверьте настройки и совместимость кошелька у провайдера.",
+    )
+
+
+def _extract_wallet_address(data):
+    if not isinstance(data, dict):
+        return None
+    for key in ("wallet_address", "walletAddress", "address"):
+        value = data.get(key)
+        if isinstance(value, str) and (
+            _re.fullmatch(r"[A-Za-z0-9_-]{48}", value)
+            or _re.fullmatch(r"-?\d+:[a-fA-F0-9]{64}", value)
+        ):
+            return value
+    for key in ("wallet", "data", "result", "ton"):
+        value = data.get(key)
+        if isinstance(value, dict):
+            address = _extract_wallet_address(value)
+            if address:
+                return address
+    return None
+
+
+def _complete_fragment_auth(bot, chat_id, jwt, result, status):
+    state = _fsm.get(chat_id) or {}
+    if jwt:
+        ver, bal, info = _check_fragment_wallet(jwt, chat_id=chat_id)
+        address = _extract_wallet_address(info)
+        updates = dict(
+            fragment_provider="legacy",
+            fragment_jwt=jwt,
+            wallet_version=ver or state.get("wallet_version"),
+            wallet_address=address,
+            mnemonic_word_count=len(state.get("mnemonic") or []),
+        )
+        updates["balance_ton"] = (
+            round(bal, 6)
+            if isinstance(bal, (int, float)) and _pls_math.isfinite(bal)
+            else None
+        )
+        updates["last_wallet_raw"] = info
+        _set_cfg(chat_id, **updates)
+        _fsm.pop(chat_id, None)
+        text = "✅ Fragment API выдал токен.\n"
+        if address:
+            text += f"Адрес кошелька: <code>{_html.escape(address)}</code>\nСверьте его с адресом получения TON в Tonkeeper перед включением продаж."
+        else:
+            text += "API не сообщил адрес кошелька. Проверьте подключённый кошелёк у провайдера перед включением продаж."
+        if bal is None:
+            text += (
+                "\nБаланс пока не получен — проверьте подключение в разделе «Токен»."
+            )
+        bot.send_message(chat_id, text, parse_mode="HTML")
+        return True
+    code = (
+        result.get("code", "auth_rejected")
+        if isinstance(result, dict)
+        else "auth_rejected"
+    )
+    message = (
+        result.get(
+            "safe_message",
+            "Fragment API не выдал токен. Проверьте настройки у провайдера.",
+        )
+        if isinstance(result, dict)
+        else "Fragment API не выдал токен."
+    )
+    keyboard = None
+    if code in ("confirmation_required", "rate_limit", "network_error"):
+        keyboard = K()
+        keyboard.row(
+            B("Я подтвердил вход", callback_data=CBT_JWT_CONFIRMED),
+            B("Повторить запрос", callback_data=CBT_JWT_RESEND),
+        )
+        keyboard.add(B("Отмена", callback_data=CBT_FSM_CANCEL))
+    else:
+        _fsm.pop(chat_id, None)
+    bot.send_message(
+        chat_id, "⚠️ " + _html.escape(message), parse_mode="HTML", reply_markup=keyboard
+    )
+    return False
+
+def _authenticate_fragment(
+    api_key: str,
+    phone_number: str,
+    version: str,
+    mnemonics: List[str],
+    chat_id: Any = None,
+) -> tuple[Optional[str], Optional[dict], int]:
+    try:
+        words = _parse_mnemonic(mnemonics)
+    except ValueError as exc:
+        return None, dict(code="invalid_mnemonic", safe_message=str(exc)), 422
     proxies = _get_proxies_for_chat(chat_id)
     try:
-        payload = {"api_key": api_key, "phone_number": phone_number, "version": version, "mnemonics": mnemonics}
-        r = requests.post(FRAGMENT_AUTH_URL, json=payload,
-                          headers={"Content-Type": "application/json", "Accept": "application/json"}, timeout=40, proxies=proxies)
-        try: data = r.json()
-        except Exception: data = {"raw": r.text}
-        if r.status_code >= 400:
-            return None, data, r.status_code
-        token_candidates = []
+        payload = {
+            "api_key": api_key,
+            "phone_number": phone_number,
+            "version": version,
+            "mnemonics": words,
+        }
+        response = requests.post(
+            FRAGMENT_AUTH_URL,
+            json=payload,
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
+            timeout=40,
+            proxies=proxies,
+        )
+        try:
+            data = response.json()
+        except ValueError:
+            data = {}
+        if response.status_code >= 400:
+            return (
+                None,
+                _fragment_auth_error(data, response.status_code, len(words)),
+                response.status_code,
+            )
+        candidates = []
         if isinstance(data, dict):
-            for key in ("token","jwt","access","authorization","Authorization","auth","detail"):
-                val = data.get(key)
-                if isinstance(val, str) and len(val) > 10:
-                    token_candidates.append(val)
-            for subkey in ("data","result","payload"):
-                sub = data.get(subkey)
-                if isinstance(sub, dict):
-                    for key in ("token","jwt","access"):
-                        val = sub.get(key)
-                        if isinstance(val, str) and len(val) > 10:
-                            token_candidates.append(val)
-        jwt = token_candidates[0] if token_candidates else None
-        return jwt, data, r.status_code
-    except Exception as e:
-        logger.warning(f"Authenticate failed: {e}")
-        return None, {"error": str(e)}, 0
+            candidates.append(data)
+            candidates.extend(
+                data[k]
+                for k in ("data", "result", "payload")
+                if isinstance(data.get(k), dict)
+            )
+        for node in candidates:
+            for key in (
+                "token",
+                "jwt",
+                "access",
+                "access_token",
+                "authorization",
+                "Authorization",
+                "auth",
+            ):
+                value = node.get(key)
+                if isinstance(value, str) and len(value) > 10:
+                    for prefix in ("Bearer ", "JWT "):
+                        if value.startswith(prefix):
+                            value = value[len(prefix) :]
+                    if len(value) > 10:
+                        return value, dict(code="authenticated"), response.status_code
+        return (
+            None,
+            _fragment_auth_error(data, response.status_code, len(words)),
+            response.status_code,
+        )
+    except Exception as exc:
+        logger.warning("Fragment authentication failed (%s)", type(exc).__name__)
+        return (
+            None,
+            dict(
+                code="network_error",
+                safe_message="Не удалось связаться с Fragment API. Проверьте сеть и повторите запрос.",
+            ),
+            0,
+        )
 
 def _is_too_many_attempts(raw_resp: Any) -> tuple[bool, Optional[int]]:
     text = ""
@@ -921,7 +1423,7 @@ def _about_text() -> str:
     return _pls_panel(
         "⭐ <b>AutoStars</b>\n"
         "Автоматическая продажа Telegram Stars\n\n"
-        f"📦 Версия: <code>{VERSION}</code> · PLS-LIC-2.3\n"
+        f"📦 Версия: <code>{VERSION}</code> · PLS-LIC-2.4\n"
         + (
             "🔑 Лицензия: временная работа до восстановления связи (до 12 часов)\n"
             if _PLS_MODE == "grace"
@@ -945,7 +1447,7 @@ HELP_TEXT = """
 2) Введите <b>API-ключ</b> из <code>fragment-api.com/dashboard</code>.
 3) Укажите <b>Телефон</b> (без «+», только цифры).
 4) Выберите <b>Версию кошелька</b> (W5/V4R2).
-5) Вставьте <b>24 слова</b> мнемофразы.
+5) Вставьте <b>12 или 24 слова</b> мнемофразы. Поддержка её стандарта определяется Fragment API.
 6) Подтвердите вход в официальном Telegram. После подтверждения токен выдастся автоматически.
 
 <b>Сообщения (шаблоны)</b>
@@ -1004,14 +1506,22 @@ def _settings_text(chat_id: Any) -> str:
 
 def _token_text(chat_id: Any) -> str:
     cfg = _get_cfg(chat_id)
+    if cfg.get("fragment_provider") == "space":
+        return ("<b>Tonkeeper · Fragment API Space</b>\n\n"
+                "Кошелёк подключён. Оплата TON; 12 слов BIP39 — V5R1.\n"
+                f"Адрес: <code>{_html.escape(str(cfg.get('wallet_address') or '—'))}</code>\n"
+                "Баланс проверяйте в Tonkeeper. Автопроверка минимального баланса здесь недоступна.\n"
+                "API получает seed для подписи; используйте отдельный рабочий кошелёк.\n"
+                "Незавершённые запросы хранятся в provider_orders.json на Cardinal; повторная отправка заблокирована.")
     token_state = "Токен привязан ✅" if cfg.get("fragment_jwt") else "Пока не создан токен ❌"
     balance_ton = cfg.get("balance_ton")
     balance_txt = f"{balance_ton} TON" if balance_ton is not None else "—"
     return (
         f"<b>Токен (JWT)</b>\n\n"
         f"• Состояние: <b>{token_state}</b>\n"
-        f"• Баланс: <code>{balance_txt}</code>\n\n"
-        "Создайте токен, следуя шагам ниже."
+        f"• Баланс: <code>{balance_txt}</code>\n"
+        f"• Адрес: <code>{_html.escape(str(cfg.get('wallet_address') or 'API не сообщил'))}</code>\n\n"
+        "Создайте токен по шагам. Для Tonkeeper сверяйте адрес; 12 и 24 слова принимаются плагином, но стандарт должен поддерживаться вашим Fragment API."
     )
 
 def _stars_text(chat_id: Any) -> str:
@@ -1123,7 +1633,9 @@ def _settings_kb(chat_id: Any) -> InlineKeyboardMarkup:
 
 def _token_kb() -> InlineKeyboardMarkup:
     kb = K()
-    kb.add(B("🧩 Создать токен", callback_data=CBT_CREATE_JWT))
+    kb.add(B("👛 Tonkeeper · 12 / 24 слова", callback_data=f"{UUID}:space"))
+    kb.add(B("📋 Запросы покупок", callback_data=f"{UUID}:space_orders"))
+    kb.add(B("🧩 Старый API · создать токен", callback_data=CBT_CREATE_JWT))
     kb.row(B("♻️ Пересоздать токен", callback_data=CBT_CREATE_JWT),
            B("🗑 Удалить токен", callback_data=CBT_DEL_JWT))
     kb.add(B("🏠 Домой", callback_data=CBT_HOME))
@@ -1336,6 +1848,10 @@ def _parse_fragment_error_text(response_text: str, status_code: int = 0) -> str:
 
 def _auto_refund_order(cardinal: "Cardinal", order_id: Any, chat_id: Any, reason: str) -> bool:
     try:
+        with _SPACE_LOCK:
+            if str(order_id) in _space_read("provider_orders.json"):
+                _safe_send(cardinal, chat_id, "Возврат заблокирован: запрос отправлялся в API. Сначала продавцу нужно проверить перевод и вернуть деньги вручную при необходимости.")
+                return False
         cardinal.account.refund(order_id)
         _safe_send(cardinal, chat_id, "✅ Средства успешно возвращены.")
         logger.warning(f"[REFUND] Заказ {order_id}: возврат выполнен. Причина: {reason}")
@@ -1870,11 +2386,15 @@ def _select_wallet_version(bot, call):
     st["wallet_version"] = ver; st["step"] = "jwt_seed"; _fsm[chat_id] = st
     try: bot.answer_callback_query(call.id, f"Версия выбрана: {ver}")
     except Exception: pass
-    bot.send_message(chat_id, "Введите 24 слова мнемофразы одной строкой (или /cancel):")
+    bot.send_message(chat_id, "Введите 12 или 24 слова мнемофразы в исходном порядке (или /cancel). Они будут переданы вашему Fragment API, не серверу лицензий.")
 
 def _del_jwt(bot, call):
     chat_id = call.message.chat.id
-    _set_cfg(chat_id, fragment_jwt=None, wallet_version=None, balance_ton=None, last_wallet_raw=None)
+    with _SPACE_LOCK:
+        credentials = _space_read("wallet_credentials.json")
+        credentials.pop(str(chat_id), None)
+        _space_write("wallet_credentials.json", credentials)
+    _set_cfg(chat_id, fragment_provider=None, fragment_jwt=None, wallet_version=None, wallet_address=None, balance_ton=None, last_wallet_raw=None)
     try: bot.answer_callback_query(call.id, "Токен удалён.")
     except Exception: pass
     _open_token(bot, call)
@@ -1890,6 +2410,9 @@ def _handle_fsm(message: Message, cardinal: Cardinal):
     chat_id = message.chat.id
     text = (message.text or "").strip()
     state = _fsm.get(chat_id) or {}
+
+    if state.get("step", "").startswith("space_"):
+        return _space_fsm(message, cardinal, state)
 
     if state.get("step") == "pls_license_key":
         _pls_receive_key(cardinal, message)
@@ -1933,28 +2456,21 @@ def _handle_fsm(message: Message, cardinal: Cardinal):
         if text.lower() in ("/cancel", "cancel", "отмена"):
             _fsm.pop(chat_id, None); cardinal.telegram.bot.send_message(chat_id, "❌ Отменено."); return
         ver = _normalize_wallet_version(text); state["wallet_version"] = ver; state["step"] = "jwt_seed"; _fsm[chat_id] = state
-        cardinal.telegram.bot.send_message(chat_id, "Вставьте 24 слова мнемофразы одной строкой (или /cancel):", reply_markup=_kb_cancel_fsm()); return
+        cardinal.telegram.bot.send_message(chat_id, "Вставьте 12 или 24 слова в исходном порядке (или /cancel). Поддержка стандарта кошелька определяется Fragment API.", reply_markup=_kb_cancel_fsm()); return
 
     if state.get("step") == "jwt_seed":
         if text.lower() in ("/cancel", "cancel", "отмена"):
             _fsm.pop(chat_id, None); cardinal.telegram.bot.send_message(chat_id, "❌ Отменено."); return
-        words = [w.strip() for w in text.replace("\n", " ").split(" ") if w.strip()]
-        if len(words) != 24:
-            cardinal.telegram.bot.send_message(chat_id, f"⚠️ Должно быть ровно 24 слова (сейчас {len(words)}). Повторите ввод или /cancel."); return
-        state["mnemonic"] = words; _fsm[chat_id] = state
-        try: cardinal.telegram.bot.delete_message(chat_id, message.message_id)
+        try: cardinal.telegram.bot.delete_message(chat_id,message.message_id)
         except Exception: pass
+        state.pop("mnemonic",None)
+        try:words=_parse_mnemonic(text)
+        except ValueError as exc:
+            cardinal.telegram.bot.send_message(chat_id,str(exc));return
+        state["mnemonic"] = words; _fsm[chat_id] = state
         api_key = state.get("api_key"); phone = state.get("phone"); wallet_ver = state.get("wallet_version") or "W5"
         jwt, raw, sc = _authenticate_fragment(api_key=api_key, phone_number=phone, version=wallet_ver, mnemonics=words, chat_id=chat_id)
-        if jwt:
-            _set_cfg(chat_id, fragment_jwt=jwt); cardinal.telegram.bot.send_message(chat_id, "✅ Успешно: токен создан и привязан.")
-            ver, bal, resp = _check_fragment_wallet(jwt, chat_id=chat_id)
-            if ver is not None or bal is not None or resp is not None:
-                _set_cfg(chat_id, wallet_version=ver, balance_ton=(round(bal, 6) if isinstance(bal, (int, float)) else None), last_wallet_raw=resp)
-            _fsm.pop(chat_id, None); return
-        is_tma, wait_sec = _is_too_many_attempts(raw)
-        if sc == 400 and is_tma: cardinal.telegram.bot.send_message(chat_id, f"Подождите {wait_sec or 'несколько'} секунд, затем подтвредите вход и подождите ответа в плагине. ", parse_mode="HTML")
-        else: cardinal.telegram.bot.send_message(chat_id, f"Пока токен не выдан (статус {sc}). Подтвердите вход в Telegram и нажмите «Я подтвердил вход».", parse_mode="HTML")
+        _complete_fragment_auth(cardinal.telegram.bot,chat_id,jwt,raw,sc)
         return
 
     if state.get("step") == "star_add_qty":
@@ -2053,50 +2569,52 @@ def _handle_fsm(message: Message, cardinal: Cardinal):
 def _jwt_confirmed(bot, call):
     chat_id = call.message.chat.id
     state = _fsm.get(chat_id) or {}
-    api_key = state.get("api_key"); phone = state.get("phone"); wallet_ver = state.get("wallet_version") or "W5"; mnemonic = state.get("mnemonic")
-    try: bot.answer_callback_query(call.id)
-    except Exception: pass
+    api_key = state.get("api_key")
+    phone = state.get("phone")
+    wallet_ver = state.get("wallet_version") or "W5"
+    mnemonic = state.get("mnemonic")
+    try:
+        bot.answer_callback_query(call.id)
+    except Exception:
+        pass
     if not (api_key and phone and wallet_ver and mnemonic):
-        bot.send_message(chat_id, "⚠️ Не хватает данных для создания токена. Попробуйте ещё раз."); _fsm.pop(chat_id, None); _open_token(bot, call); return
-    jwt, raw, sc = _authenticate_fragment(api_key=api_key, phone_number=phone, version=wallet_ver, mnemonics=mnemonic, chat_id=chat_id)
-    if jwt:
-        _set_cfg(chat_id, fragment_jwt=jwt); bot.send_message(chat_id, "✅ Успешно: токен создан и привязан.")
-        ver, bal, resp = _check_fragment_wallet(jwt, chat_id=chat_id)
-        if ver is not None or bal is not None or resp is not None:
-            _set_cfg(chat_id, wallet_version=ver, balance_ton=(round(bal, 6) if isinstance(bal, (int, float)) else None), last_wallet_raw=resp)
+        bot.send_message(
+            chat_id, "⚠️ Не хватает данных для создания токена. Попробуйте ещё раз."
+        )
         _fsm.pop(chat_id, None)
-    else:
-        is_tma, wait_sec = _is_too_many_attempts(raw)
-        if sc == 400 and is_tma:
-            bot.send_message(chat_id, f"Слишком много попыток входа. Подождите {wait_sec or 'несколько'} секунд и попробуйте ещё раз.")
-        else:
-            try: text = json.dumps(raw, ensure_ascii=False, indent=2)[:1900]
-            except Exception: text = str(raw)[:1900]
-            bot.send_message(chat_id, f"⚠️ Токен пока не выдан. Статус: <code>{sc}</code>\nОтвет сервера:\n<code>{text}</code>", parse_mode="HTML")
-    try: _open_token(bot, call)
-    except Exception: pass
+        _open_token(bot, call)
+        return
+    jwt, raw, sc = _authenticate_fragment(
+        api_key=api_key,
+        phone_number=phone,
+        version=wallet_ver,
+        mnemonics=mnemonic,
+        chat_id=chat_id,
+    )
+    _complete_fragment_auth(bot, chat_id, jwt, raw, sc)
 
 def _jwt_resend(bot, call):
     chat_id = call.message.chat.id
     st = _fsm.get(chat_id) or {}
-    api_key = st.get("api_key"); phone = st.get("phone"); wallet_ver = st.get("wallet_version") or "W5"; words = st.get("mnemonic")
-    try: bot.answer_callback_query(call.id, "Отправляю запрос…")
-    except Exception: pass
+    api_key = st.get("api_key")
+    phone = st.get("phone")
+    wallet_ver = st.get("wallet_version") or "W5"
+    words = st.get("mnemonic")
+    try:
+        bot.answer_callback_query(call.id, "Отправляю запрос…")
+    except Exception:
+        pass
     if not (api_key and phone and words):
-        bot.send_message(chat_id, "Не хватает данных для повтора."); return
-    jwt, raw, sc = _authenticate_fragment(api_key=api_key, phone_number=phone, version=wallet_ver, mnemonics=words, chat_id=chat_id)
-    if jwt:
-        _set_cfg(chat_id, fragment_jwt=jwt); bot.send_message(chat_id, "✅ Успешно: токен создан и привязан.")
-        ver, bal, resp = _check_fragment_wallet(jwt, chat_id=chat_id)
-        if ver is not None or bal is not None or resp is not None:
-            _set_cfg(chat_id, wallet_version=ver, balance_ton=(round(bal, 6) if isinstance(bal, (int, float)) else None), last_wallet_raw=resp)
-        _fsm.pop(chat_id, None); _open_token(bot, call); return
-    is_tma, wait_sec = _is_too_many_attempts(raw)
-    if sc == 400 and is_tma: bot.send_message(chat_id, f"Слишком много попыток входа. Подождите {wait_sec or 'несколько'} секунд и попробуйте снова.")
-    else:
-        try: pretty = json.dumps(raw, ensure_ascii=False, indent=2)
-        except Exception: pretty = str(raw)
-        bot.send_message(chat_id, "Ответ сервера:\n<code>{}</code>".format(pretty[:1900]), parse_mode="HTML")
+        bot.send_message(chat_id, "Не хватает данных для повтора.")
+        return
+    jwt, raw, sc = _authenticate_fragment(
+        api_key=api_key,
+        phone_number=phone,
+        version=wallet_ver,
+        mnemonics=words,
+        chat_id=chat_id,
+    )
+    _complete_fragment_auth(bot, chat_id, jwt, raw, sc)
 
 # ========================================================================
 # 8. ОБРАБОТЧИКИ СОБЫТИЙ FUNPAY (ЗАКАЗЫ, СООБЩЕНИЯ)
@@ -2131,13 +2649,19 @@ def _do_confirm_send(cardinal: "Cardinal", chat_id):
         return
 
     _safe_send(cardinal, chat_id, _tpl(chat_id, "sending", qty=qty, username=username.lstrip("@")))
-    resp = _order_stars(jwt, username=username, quantity=qty, show_sender=False, chat_id=chat_id)
+    resp = _order_stars(jwt, username=username, quantity=qty, show_sender=False, chat_id=chat_id, order_id=pend.get("order_id"))
+
+    if (resp or {}).get("pending"):
+        _update_current(chat_id, stage="await_confirm")
+        _safe_send(cardinal, chat_id, "⏳ Покупка обрабатывается или требует проверки продавцом. Отправьте + для проверки существующего запроса. Новая оплата и автовозврат заблокированы.")
+        return
 
     if resp and resp.get("ok"):
         oid = pend.get("order_id")
         order_url = f"https://funpay.com/orders/{oid}/" if oid else ""
         _safe_send(cardinal, chat_id, _tpl(chat_id, "sent", qty=qty, username=username.lstrip('@'), order_url=order_url))
 
+        _space_notified(oid)
         _record_sale(cardinal, chat_id, qty, oid)
         _maybe_auto_deactivate(cardinal, cfg, chat_id)
 
@@ -2253,11 +2777,16 @@ def new_order_handler(cardinal: Cardinal, event):
 
         if jwt and username and qty >= 50 and _check_username_exists(username, jwt, chat_id=chat_id):
             _safe_send(cardinal, chat_id, _tpl(chat_id, "sending", qty=qty, username=username.lstrip("@")))
-            resp = _order_stars(jwt, username=username.lstrip("@"), quantity=qty, show_sender=False, chat_id=chat_id)
+            resp = _order_stars(jwt, username=username.lstrip("@"), quantity=qty, show_sender=False, chat_id=chat_id, order_id=order_id)
+            if resp.get("pending"):
+                _update_current(chat_id, candidate=username.lstrip("@"), stage="await_confirm")
+                _safe_send(cardinal, chat_id, "⏳ Покупка обрабатывается или требует проверки продавцом. Отправьте + для проверки запроса. Повторной оплаты и автовозврата не будет.")
+                return
             if resp.get("ok"):
                 order_url = f"https://funpay.com/orders/{order_id}/" if order_id else ""
                 _safe_send(cardinal, chat_id, _tpl(chat_id, "sent", qty=qty, username=username.lstrip("@"), order_url=order_url))
 
+                _space_notified(order_id)
                 _record_sale(cardinal, chat_id, qty, order_id)
                 _maybe_auto_deactivate(cardinal, cfg, chat_id)
 
@@ -2368,6 +2897,14 @@ def new_message_handler(cardinal: Cardinal, event: NewMessageEvent):
             return
 
         pend = _current(chat_id)
+        if not pend and _space_enabled(chat_id):
+            with _SPACE_LOCK:
+                recovered = [(oid, rec) for oid, rec in _space_read("provider_orders.json").items()
+                             if rec.get("chat_id") == str(chat_id) and not rec.get("notified")]
+            if recovered:
+                oid, rec = recovered[0]
+                _push(chat_id, {"order_id": oid, "qty": rec["quantity"], "candidate": rec["username"], "stage": "await_confirm"})
+                pend = _current(chat_id)
         if not pend: return
 
         if str(pend.get("stage")) == "await_confirm" and text.lower() in {"+", "++", "да", "ок", "ok"}:
@@ -2421,7 +2958,7 @@ def init_cardinal(cardinal: Cardinal):
     except Exception:
         pass
 
-    logger.info(f"Загружен {NAME} v{VERSION} [PLS-LIC-2.3]. Продажа требует подтверждённой лицензии.")
+    logger.info(f"Загружен {NAME} v{VERSION} [PLS-LIC-2.4]. Продажа требует подтверждённой лицензии.")
     if not _pls_has_key():
         logger.warning("AutoStars: ключ не введён. Откройте /autostars в Telegram-боте Cardinal для активации.")
 
@@ -2440,6 +2977,7 @@ def init_cardinal(cardinal: Cardinal):
     tg.msg_handler(
         lambda m: _handle_fsm(m, cardinal),
         func=lambda m: (m.chat.id in _fsm and _fsm[m.chat.id].get("step") in {
+            "space_consent","space_address","space_seed",
             "pls_license_key","jwt_api_key","jwt_phone","jwt_wallet_ver","jwt_seed",
             "set_min_balance","set_notify_bal","star_add_qty","star_add_lotid",
             "msg_edit_value","ton_price","frag_rate","presale_text","custom_proxy"
@@ -2470,6 +3008,8 @@ def init_cardinal(cardinal: Cardinal):
     tg.cbq_handler(lambda c: _ask_set_min_balance(bot, c), func=lambda c: c.data == CBT_SET_MIN_BAL)
     tg.cbq_handler(lambda c: _ask_set_notify_balance(bot, c), func=lambda c: c.data == CBT_SET_NOTIFY_BAL)
     tg.msg_handler(lambda m: _cancel_cmd(cardinal, m.chat.id), commands=["cancel"])
+    tg.cbq_handler(lambda c: _space_orders_panel(bot, c), func=lambda c: c.data == f"{UUID}:space_orders")
+    tg.cbq_handler(lambda c: _start_space(bot, c), func=lambda c: c.data == f"{UUID}:space")
     tg.cbq_handler(lambda c: _start_create_jwt(bot, c), func=lambda c: c.data == CBT_CREATE_JWT)
     tg.cbq_handler(lambda c: _jwt_confirmed(bot, c),   func=lambda c: c.data == CBT_JWT_CONFIRMED)
     tg.cbq_handler(lambda c: _jwt_resend(bot, c),      func=lambda c: c.data == CBT_JWT_RESEND)
