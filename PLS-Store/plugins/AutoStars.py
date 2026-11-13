@@ -76,6 +76,8 @@ def _pls_require_license(cardinal):
     fid = str(getattr(cardinal.account, "id", "") or "")
     if not fid.isascii() or not fid.isdigit() or int(fid) <= 0:
         raise RuntimeError("AutoStars: FunPay ID ещё недоступен. Дождитесь входа Cardinal в FunPay.")
+    if not _PLS_ENDPOINT.startswith("https://"):
+        raise RuntimeError("AutoStars: адрес проверки не настроен. Скачайте плагин через раздел «Лицензии» в PLS Store.")
     with _PLS_LOCK:
         if fid == _PLS_ACCOUNT and _pls_time.monotonic() - _PLS_CHECKED < 60:
             return
@@ -83,8 +85,6 @@ def _pls_require_license(cardinal):
             settings = json.loads(_PlsPath("storage/plugins/AutoStars/license.json").read_text(encoding="utf-8"))
             key = settings["key"]
             if not isinstance(key, str) or not key.startswith("PLS-"):
-                raise ValueError()
-            if not _PLS_ENDPOINT.startswith("https://"):
                 raise ValueError()
             # No plugin config, Fragment credentials, mnemonic or wallet information.
             response = requests.post(_PLS_ENDPOINT,
@@ -142,7 +142,7 @@ def _log(level: str, msg: str):
 # 2. МЕТАДАННЫЕ ПЛАГИНА И КОНСТАНТЫ
 # ========================================================================
 NAME        = "AutoStars"
-VERSION     = "2.1"
+VERSION     = "2.2"
 DESCRIPTION = "Плагин по продаже звезд."
 CREDITS     = "@uservkru"
 UUID        = "fa0c2f3a-7a85-4c09-a3b2-9f3a9b8f8a75"
@@ -534,6 +534,154 @@ def _is_too_many_attempts(raw_resp: Any) -> tuple[bool, Optional[int]]:
 # ========================================================================
 # 5. ИНТЕРФЕЙС И КЛАВИАТУРЫ (TELEGRAM)
 # ========================================================================
+def _pls_has_key():
+    try:
+        key = json.loads(
+            _PlsPath("storage/plugins/AutoStars/license.json").read_text(
+                encoding="utf-8"
+            )
+        ).get("key")
+        return isinstance(key, str) and bool(
+            _re.fullmatch(r"PLS-[A-Za-z0-9_-]{43}", key)
+        )
+    except (OSError, ValueError, TypeError, AttributeError):
+        return False
+
+
+def _pls_license_kb():
+    kb = K()
+    kb.row(
+        B("🔑 Ввести ключ", callback_data=CBT_LICENSE_ENTER, style="success"),
+        B("🔄 Проверить", callback_data=CBT_LICENSE_CHECK, style="primary"),
+    )
+    kb.add(B("« Назад к плагинам", callback_data=CBT_BACK_PLUGINS, style="danger"))
+    return kb
+
+
+def _pls_show_activation(cardinal, chat_id, msg_id=None, note=None):
+    fid = str(getattr(getattr(cardinal, "account", None), "id", "") or "")
+    active = (
+        _PLS_ACCOUNT == fid
+        and _PLS_CHECKED > 0
+        and _pls_time.monotonic() - _PLS_CHECKED < 60
+    )
+    status = "✅ подтверждена" if active else "🔒 требуется проверка"
+    saved = "сохранён" if _pls_has_key() else "не введён"
+    text = (
+        f"🔑 <b>Лицензия AutoStars</b> · v{VERSION}\n\n"
+        f"Статус: <b>{status}</b>\nКлюч: <b>{saved}</b>\n"
+        f"FunPay ID: <code>{_html.escape(fid) if fid else 'ожидается вход в FunPay'}</code>\n\n"
+        "Для работы требуется бессрочный ключ из PLS Store → Лицензии.\n"
+        "Нажмите «Ввести ключ» и отправьте его следующим сообщением. "
+        "Либо положите выданный license.json в storage/plugins/AutoStars/.\n\n"
+        "При проверке ключ привязывается к указанному FunPay ID. "
+        "Без подтверждения лицензии отправка Stars недоступна."
+    )
+    if note:
+        text += "\n\n" + _html.escape(note)
+    if msg_id is not None:
+        _safe_edit(cardinal.telegram.bot, chat_id, msg_id, text, _pls_license_kb())
+    else:
+        _send_panel(cardinal.telegram.bot, chat_id, text, _pls_license_kb())
+
+
+def _pls_gate(cardinal, chat_id, msg_id=None):
+    try:
+        _pls_require_license(cardinal)
+    except RuntimeError as exc:
+        _pls_show_activation(cardinal, chat_id, msg_id, str(exc))
+        return False
+    return True
+
+
+def _pls_command_home(cardinal, message):
+    if _pls_gate(cardinal, message.chat.id):
+        _send_panel(cardinal.telegram.bot, message.chat.id, _about_text(), _home_kb())
+
+
+def _pls_open_license(cardinal, call):
+    cardinal.telegram.bot.answer_callback_query(call.id)
+    _pls_show_activation(cardinal, call.message.chat.id, call.message.id)
+
+
+def _pls_start_key(cardinal, call):
+    bot = cardinal.telegram.bot
+    bot.answer_callback_query(call.id)
+    _fsm[call.message.chat.id] = {"step": "pls_license_key"}
+    _send_panel(
+        bot,
+        call.message.chat.id,
+        "🔑 <b>Активация AutoStars</b>\n\nОтправьте лицензионный ключ из PLS Store следующим сообщением (PLS-…). "
+        "Не отправляйте токен Fragment, seed-фразу или данные кошелька. Отмена: /cancel.",
+        _kb_cancel_fsm(),
+    )
+
+
+def _pls_check_key(cardinal, call):
+    global _PLS_CHECKED, _PLS_ACCOUNT
+    cardinal.telegram.bot.answer_callback_query(call.id)
+    with _PLS_LOCK:
+        _PLS_CHECKED = 0.0
+        _PLS_ACCOUNT = None
+    if _pls_gate(cardinal, call.message.chat.id, call.message.id):
+        _safe_edit(
+            cardinal.telegram.bot,
+            call.message.chat.id,
+            call.message.id,
+            _about_text(),
+            _home_kb(),
+        )
+
+
+def _pls_receive_key(cardinal, message):
+    global _PLS_CHECKED, _PLS_ACCOUNT
+    key = (message.text or "").strip()
+    bot = cardinal.telegram.bot
+    chat_id = message.chat.id
+    if key.lower() in ("/cancel", "cancel", "отмена"):
+        _fsm.pop(chat_id, None)
+        _pls_show_activation(cardinal, chat_id, note="Ввод отменён.")
+        return
+    # Try to remove the secret from chat history, including malformed inputs.
+    try:
+        bot.delete_message(chat_id, message.message_id)
+    except Exception:
+        pass
+    if not _re.fullmatch(r"PLS-[A-Za-z0-9_-]{43}", key):
+        _send_panel(
+            bot,
+            chat_id,
+            "Нужен ключ PLS-… из магазина. Он не является токеном Fragment. Попробуйте ещё раз или /cancel.",
+        )
+        return
+    path = _PlsPath("storage/plugins/AutoStars/license.json")
+    temporary = path.with_suffix(".json.tmp")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with _PLS_LOCK:
+            fd = os.open(str(temporary), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as output:
+                json.dump({"key": key}, output)
+            os.chmod(str(temporary), 0o600)
+            os.replace(str(temporary), str(path))
+            _PLS_CHECKED = 0.0
+            _PLS_ACCOUNT = None
+    except OSError:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+        _send_panel(
+            bot,
+            chat_id,
+            "Не удалось сохранить ключ. Проверьте права записи в storage/plugins/AutoStars. Ввод можно повторить.",
+        )
+        return
+    _fsm.pop(chat_id, None)
+    if _pls_gate(cardinal, chat_id):
+        _send_panel(bot, chat_id, _about_text(), _home_kb())
+
+
 def _state_on(v: bool) -> str:
     return "🟢 Включено" if v else "🔴 Выключено"
 
@@ -550,7 +698,8 @@ def _about_text() -> str:
     return _pls_panel(
         "⭐ <b>AutoStars</b>\n"
         "Автоматическая продажа Telegram Stars\n\n"
-        f"📦 Версия: <code>{VERSION}</code>\n"
+        f"📦 Версия: <code>{VERSION}</code> · PLS-LIC-2.2\n"
+        "🔑 Лицензия: подтверждена\n"
         f"👤 Автор: {CREDITS}\n\n"
         "Управляйте лотами, финансами и настройками по кнопкам ниже."
     )
@@ -707,7 +856,8 @@ def _home_kb() -> InlineKeyboardMarkup:
            B("⭐ Лоты", callback_data=CBT_STARS, style="success"))
     kb.row(B("💬 Сообщения", callback_data=CBT_MESSAGES, style="primary"),
            B("📊 Финансы", callback_data=CBT_FINANCE, style="success"))
-    kb.row(B("📖 Инструкция", callback_data=CBT_HELP, style="primary"))
+    kb.row(B("🔑 Лицензия", callback_data=CBT_LICENSE, style="primary"),
+           B("📖 Инструкция", callback_data=CBT_HELP, style="primary"))
     kb.add(B("« Назад к плагинам", callback_data=CBT_BACK_PLUGINS, style="danger"))
     return kb
 
@@ -1077,6 +1227,9 @@ def _safe_send(c: "Cardinal", chat_id, text: str):
 # 7. ОБРАБОТЧИКИ СОБЫТИЙ (TELEGRAM CALLBACKS И МЕНЮ)
 # ========================================================================
 CBT_HOME       = f"{UUID}:home"
+CBT_LICENSE = f"{UUID}:license"
+CBT_LICENSE_ENTER = f"{UUID}:license_enter"
+CBT_LICENSE_CHECK = f"{UUID}:license_check"
 CBT_SETTINGS   = f"{UUID}:settings"
 CBT_HELP       = f"{UUID}:help"
 CBT_FSM_CANCEL = f"{UUID}:fsm_cancel"
@@ -1251,12 +1404,18 @@ def _toggle_plugin(bot, call):
     chat_id = call.message.chat.id
     cfg = _get_cfg(chat_id)
     new_state = not bool(cfg.get("plugin_enabled", True))
+    if new_state and not _pls_gate(_CARDINAL_REF, chat_id):
+        return
     _set_cfg(chat_id, plugin_enabled=new_state)
     try: bot.answer_callback_query(call.id, "Плагин включён." if new_state else "Плагин выключен.")
     except Exception: pass
     _open_settings(bot, call)
 
 def _open_home(bot, call):
+    if not _pls_gate(_CARDINAL_REF, call.message.chat.id, call.message.id):
+        try: bot.answer_callback_query(call.id)
+        except Exception: pass
+        return
     _safe_edit(bot, call.message.chat.id, call.message.id, _about_text(), _home_kb())
     try: bot.answer_callback_query(call.id)
     except Exception: pass
@@ -1504,6 +1663,10 @@ def _handle_fsm(message: Message, cardinal: Cardinal):
     chat_id = message.chat.id
     text = (message.text or "").strip()
     state = _fsm.get(chat_id) or {}
+
+    if state.get("step") == "pls_license_key":
+        _pls_receive_key(cardinal, message)
+        return
 
     if state.get("step") == "jwt_api_key":
         if text.lower() in ("/cancel", "cancel", "отмена"):
@@ -2026,16 +2189,20 @@ def init_cardinal(cardinal: Cardinal):
         cardinal.add_telegram_commands(UUID, [
             ("autostars", "Открыть панель AutoStars", True),
             ("autostars_help", "Инструкция AutoStars", True),
+            ("autostars_license", "Лицензия AutoStars", True),
         ])
     except Exception:
         pass
 
-    logger.info(f"🚀 Плагин {NAME} v{VERSION} запущен.")
+    logger.info(f"Загружен {NAME} v{VERSION} [PLS-LIC-2.2]. Продажа требует подтверждённой лицензии.")
+    if not _pls_has_key():
+        logger.warning("AutoStars: ключ не введён. Откройте /autostars в Telegram-боте Cardinal для активации.")
 
-    tg.msg_handler(lambda m: bot.send_message(
-        m.chat.id, _about_text(), parse_mode="HTML",
-        reply_markup=_home_kb(), disable_web_page_preview=True
-    ), commands=["autostars"])
+    tg.msg_handler(lambda m: _pls_command_home(cardinal, m), commands=["autostars"])
+    tg.msg_handler(lambda m: _pls_show_activation(cardinal, m.chat.id), commands=["autostars_license"])
+    tg.cbq_handler(lambda c: _pls_open_license(cardinal, c), func=lambda c: c.data == CBT_LICENSE)
+    tg.cbq_handler(lambda c: _pls_start_key(cardinal, c), func=lambda c: c.data == CBT_LICENSE_ENTER)
+    tg.cbq_handler(lambda c: _pls_check_key(cardinal, c), func=lambda c: c.data == CBT_LICENSE_CHECK)
 
     tg.msg_handler(lambda m: bot.send_message(
         m.chat.id, HELP_TEXT, parse_mode="HTML",
@@ -2046,7 +2213,7 @@ def init_cardinal(cardinal: Cardinal):
     tg.msg_handler(
         lambda m: _handle_fsm(m, cardinal),
         func=lambda m: (m.chat.id in _fsm and _fsm[m.chat.id].get("step") in {
-            "jwt_api_key","jwt_phone","jwt_wallet_ver","jwt_seed",
+            "pls_license_key","jwt_api_key","jwt_phone","jwt_wallet_ver","jwt_seed",
             "set_min_balance","set_notify_bal","star_add_qty","star_add_lotid",
             "msg_edit_value","ton_price","frag_rate","presale_text","custom_proxy"
         })

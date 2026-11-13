@@ -1,10 +1,15 @@
 """Register the supplied plugin and apply approved catalog releases once."""
 
 from pathlib import Path
+from hashlib import sha256
 from services.db import db
 from services.licenses import audit
 
 ROOT = Path(__file__).resolve().parents[1]
+_PREVIOUS_BUNDLED_GUIDES = {
+    "71329ee4081069c82deb88c1b9cc415ffdf83a05594a1689e4c7b33f4d9c1e36",
+    "a8b49a0c8c5640cbb6eaed0eeb99570b490b57d8aea3a7ceb00084918857c474",
+}
 
 
 def setup_autostars():
@@ -20,7 +25,7 @@ def setup_autostars():
             pid = rows[0]["id"]
         else:
             pid = conn.execute(
-                "INSERT INTO products(name,price,price_rub,description,version,active) VALUES('AutoStars','349₽ / Навсегда',349,'Автоматическая продажа Telegram Stars для FunPay Cardinal. Бессрочная лицензия на один аккаунт FunPay.','2.1',1)"
+                "INSERT INTO products(name,price,price_rub,description,version,active) VALUES('AutoStars','349₽ / Навсегда',349,'Автоматическая продажа Telegram Stars для FunPay Cardinal. Бессрочная лицензия на один аккаунт FunPay.','2.2',1)"
             ).lastrowid
         if not conn.execute(
             "SELECT 1 FROM bot_settings WHERE key='autostars_price_349_v1'"
@@ -45,3 +50,24 @@ def setup_autostars():
                 ),
             )
             audit(conn, None, "setup", f"asset:{pid}:autostars")
+
+        # Only the bundled product follows the bundled file version automatically.
+        conn.execute(
+            "UPDATE products SET version='2.2' WHERE id=? AND EXISTS (SELECT 1 FROM license_assets WHERE product_id=? AND file_path='plugins/AutoStars.py')",
+            (pid, pid),
+        )
+
+        existing = conn.execute(
+            "SELECT instruction FROM license_assets WHERE product_id=? AND file_path='plugins/AutoStars.py'",
+            (pid,),
+        ).fetchone()
+        if (
+            existing
+            and sha256(existing["instruction"].encode()).hexdigest()
+            in _PREVIOUS_BUNDLED_GUIDES
+        ):
+            conn.execute(
+                "UPDATE license_assets SET instruction=? WHERE product_id=?",
+                ((ROOT / "docs/AUTOSTARS_INSTALL.txt").read_text(), pid),
+            )
+            audit(conn, None, "setup", f"asset:{pid}:guide2.2")
