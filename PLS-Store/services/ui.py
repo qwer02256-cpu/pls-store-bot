@@ -77,7 +77,6 @@ def profile_kb(lang: str = "ru") -> InlineKeyboardMarkup:
     }
     topup, purchases, api, promo, referral, back = labels.get(lang, labels["ru"])
     return InlineKeyboardMarkup(inline_keyboard=[
-        [design_button("btn_licenses", "🔑 Лицензии", "licenses", "primary", {"ru":"🔑 Лицензии","en":"🔑 Licenses","uk":"🔑 Ліцензії"}.get(lang,"🔑 Лицензии"))],
         [design_button("btn_topup", topup, "topup", "success", text_override=topup)],
         [design_button("btn_purchases", purchases, "mypurchases", "primary", text_override=purchases), design_button("btn_api", api, "api_info", "primary", text_override=api)],
         [design_button("btn_promo", promo, "promo", "primary", text_override=promo), design_button("btn_referral", referral, "referral", "primary", text_override=referral)],

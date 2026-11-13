@@ -8,7 +8,7 @@ from services.ui import main_menu_kb, profile_kb
 
 
 class DesignTests(unittest.TestCase):
-    def test_licenses_in_home_and_profile_with_color_in_each_language(self):
+    def test_licenses_only_in_home_with_color_in_each_language(self):
         with patch("services.ui.get_setting", side_effect=lambda key, default: default):
             for lang, label in [
                 ("ru", "🔑 Лицензии"),
@@ -18,7 +18,14 @@ class DesignTests(unittest.TestCase):
                 home = main_menu_kb(lang)
                 self.assertEqual(home.inline_keyboard[-2][0].callback_data, "licenses")
                 self.assertEqual(home.inline_keyboard[-1][0].callback_data, "support")
-                for markup in [home, profile_kb(lang)]:
+                self.assertFalse(
+                    any(
+                        b.callback_data == "licenses"
+                        for row in profile_kb(lang).inline_keyboard
+                        for b in row
+                    )
+                )
+                for markup in [home]:
                     button = next(
                         b
                         for row in markup.inline_keyboard

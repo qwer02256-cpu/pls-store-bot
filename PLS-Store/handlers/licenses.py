@@ -136,7 +136,19 @@ async def show_list(message, uid, page=0):
     await message.answer(
         f"<b>PLS Store</b>\n{title(uid)}\n━━━━━━━━━━━━━━━━━━━━\n\n"
         + ("Выберите лицензию." if rows else "Пока нет лицензий."),
-        reply_markup=keyboard(buttons + [[("← Профиль", "profile")]]),
+        reply_markup=keyboard(
+            buttons
+            + [
+                [
+                    (
+                        {"ru": "← Назад", "en": "← Back", "uk": "← Назад"}[
+                            get_user_language(uid)
+                        ],
+                        "home",
+                    )
+                ]
+            ]
+        ),
     )
 
 
