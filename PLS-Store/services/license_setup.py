@@ -7,6 +7,7 @@ from services.licenses import audit
 
 ROOT = Path(__file__).resolve().parents[1]
 _PREVIOUS_BUNDLED_GUIDES = {
+    "34da490eeb5cc988619272b9966d3c16c40c6bdcd96133ee2e46e4400308f02d",
     "dc1e7de752676901775d0bb7d9b14b42df0e85a346da80355c4ec85cd4e53260",
     "71329ee4081069c82deb88c1b9cc415ffdf83a05594a1689e4c7b33f4d9c1e36",
     "a8b49a0c8c5640cbb6eaed0eeb99570b490b57d8aea3a7ceb00084918857c474",

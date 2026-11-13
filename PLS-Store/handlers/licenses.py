@@ -86,22 +86,6 @@ async def deliver(bot, lid, uid):
         reply_markup=keyboard([[("Лицензии", "licenses")]]),
     )
     await bot.send_document(uid, BufferedInputFile(content, filename=filename))
-    product_name = data["product_name"]
-    version = data["product_version"]
-    activation = (
-        "AutoStars: в Telegram-боте Cardinal откройте /autostars → Ввести ключ и отправьте строку PLS-… выше."
-        if filename == "AutoStars.py"
-        else "Установите плагин и введите ключ согласно INSTALL.txt."
-    )
-    key_document = (
-        f"PLS STORE — ЛИЦЕНЗИОННЫЙ КЛЮЧ\nТовар: {product_name}\nВерсия файла: {version or '—'}\n"
-        f"Лицензия: #{lid}, бессрочная\n\n{row['license_key']}\n\n"
-        f"{activation}\n"
-        "Это ключ плагина, не токен Fragment. Не публикуйте его. Подробная настройка функций — в INSTALL.txt.\n"
-    )
-    await bot.send_document(
-        uid, BufferedInputFile(key_document.encode("utf-8"), filename="LICENSE_KEY.txt")
-    )
     await bot.send_document(
         uid, BufferedInputFile(data["instruction"].encode(), filename="INSTALL.txt")
     )
@@ -667,7 +651,7 @@ async def product_assets_card(target, pid, note=""):
     text = (
         f"📦 <b>{html.escape(product['name'])}</b>\n\nВерсия в каталоге: {html.escape(product['version'] or 'не указана')}\n"
         f"Файл: {html.escape(filename)}\nTXT-инструкция: {'готова' if data and data['instruction'].strip() else 'не загружена'}\n\n"
-        "Выдача: файл плагина + LICENSE_KEY.txt + INSTALL.txt. Обновление файла доступно по прежним лицензиям."
+        "Выдача: файл плагина + ключ сообщением + INSTALL.txt. Обновление файла доступно по прежним лицензиям."
     )
     if note:
         text += "\n\n" + html.escape(note)

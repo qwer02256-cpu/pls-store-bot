@@ -1184,7 +1184,7 @@ async def notify_purchase(result, bot):
     amount = result["amount"]
     with db() as conn:
         license_row = conn.execute(
-            "SELECT id FROM licenses WHERE purchase_id=?", (result["purchase_id"],)
+            "SELECT id,license_key FROM licenses WHERE purchase_id=?", (result["purchase_id"],)
         ).fetchone()
     if license_row:
         try:
@@ -1200,8 +1200,8 @@ async def notify_purchase(result, bot):
                 product=safe_stored_html(result["product_name"]),
                 amount=amount,
             )
-            + "\n\n"
-            + receipt_text(
+            + (f"\n\n🔑 <code>{html.escape(license_row['license_key'])}</code>" if license_row else "")
+            + "\n\n" + receipt_text(
                 get_user_language(user_id),
                 result["balance_debit"],
                 result["external_amount"],

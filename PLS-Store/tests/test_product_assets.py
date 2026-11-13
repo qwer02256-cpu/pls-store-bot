@@ -114,12 +114,11 @@ class ProductAssetTests(unittest.IsolatedAsyncioTestCase):
         docs = [c.args[1] for c in bot.send_document.await_args_list]
         self.assertEqual(
             [d.filename for d in docs],
-            ["MyPlugin.py", "LICENSE_KEY.txt", "INSTALL.txt"],
+            ["MyPlugin.py", "INSTALL.txt"],
         )
         self.assertEqual(docs[0].data.decode(), source)
-        self.assertIn(self.key, docs[1].data.decode())
-        self.assertIn("2.4.1", docs[1].data.decode())
-        self.assertEqual(docs[2].data.decode(), "Old functional guide")
+        self.assertIn(self.key, bot.send_message.call_args.args[1])
+        self.assertEqual(docs[1].data.decode(), "Old functional guide")
         self.assertEqual(owned(self.lid, 10)["license_key"], self.key)
         with db.db() as conn:
             self.assertEqual(

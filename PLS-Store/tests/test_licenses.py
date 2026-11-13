@@ -199,11 +199,13 @@ class LicenseTests(unittest.IsolatedAsyncioTestCase):
         ):
             self.assertTrue(await handlers.deliver(bot, self.lid, 10))
             self.assertTrue(await handlers.deliver(bot, self.lid, 10))
-        self.assertEqual(bot.send_document.await_count, 6)
+        self.assertEqual(bot.send_document.await_count, 4)
         docs = bot.send_document.await_args_list
-        self.assertIn(self.key, docs[1].args[1].data.decode("utf-8"))
-        self.assertEqual(docs[1].args[1].filename, "LICENSE_KEY.txt")
-        self.assertIn(self.key, docs[4].args[1].data.decode("utf-8"))
+        self.assertIn(self.key, bot.send_message.await_args_list[0].args[1])
+        self.assertEqual(
+            [c.args[1].filename for c in docs],
+            ["AutoStars.py", "INSTALL.txt", "AutoStars.py", "INSTALL.txt"],
+        )
         self.assertIn(b"https://store.example/licenses/verify", docs[0].args[1].data)
         self.assertNotIn(b"__PLS_LICENSE_ENDPOINT__", docs[0].args[1].data)
         with db.db() as conn:
