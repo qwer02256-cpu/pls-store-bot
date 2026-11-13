@@ -43,7 +43,7 @@ class CheckoutTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(main,'has_accepted_license',return_value=True),patch.object(main,'safe_edit_or_send',AsyncMock()) as render:
             await main.cb_product(self.callback)
         buttons=[b for row in render.call_args.kwargs['reply_markup'].inline_keyboard for b in row]
-        self.assertEqual(sum(b.callback_data==f'buyproduct:{self.product_id}' for b in buttons),1)
+        self.assertEqual(sum((b.callback_data or '').startswith(f'buyproduct:{self.product_id}:') for b in buttons),1)
         self.assertFalse(any((b.callback_data or '').startswith('buy:') or 'вручную' in b.text for b in buttons))
 
     async def test_buy_and_legacy_actions_show_methods_without_balance_gate(self):
@@ -52,8 +52,8 @@ class CheckoutTests(unittest.IsolatedAsyncioTestCase):
             with patch.object(main,'safe_edit_or_send',AsyncMock()) as render:
                 await main.cb_buy_balance(self.callback,self.bot)
             callbacks=[b.callback_data for row in render.call_args.kwargs['reply_markup'].inline_keyboard for b in row]
-            self.assertIn(f'purchasepay:2:{self.product_id}',callbacks)
-            self.assertIn(f'purchasepay:13:{self.product_id}',callbacks)
+            self.assertTrue(any(c.startswith(f'purchasepay:2:{self.product_id}:') for c in callbacks))
+            self.assertTrue(any(c.startswith(f'purchasepay:13:{self.product_id}:') for c in callbacks))
             self.assertNotIn('topup',callbacks)
         with db.db() as conn:self.assertEqual(conn.execute('SELECT COUNT(*) FROM payments').fetchone()[0],0)
 
@@ -61,12 +61,12 @@ class CheckoutTests(unittest.IsolatedAsyncioTestCase):
         for method in (2,13):
             provider=await self.invoice(method,f'tx{method}')
             self.assertEqual(provider.create_payment.call_args.kwargs['payment_method'],method)
-            self.assertEqual(provider.create_payment.call_args.kwargs['amount'],299)
+            self.assertEqual(provider.create_payment.call_args.kwargs['amount'],249)
             self.assertNotIn('На баланс поступит',self.message.answer.call_args.args[0])
         with db.db() as conn:
             rows=conn.execute('SELECT purpose,amount,product_id,product_name FROM payments').fetchall()
             self.assertEqual([(r['purpose'],r['amount'],r['product_id'],r['product_name']) for r in rows],
-                             [('purchase',299,self.product_id,'Plugin')]*2)
+                             [('purchase',249,self.product_id,'Plugin')]*2)
         self.assertEqual(db.get_user(2)['balance'],50)
 
     async def test_confirmed_purchase_is_atomic_idempotent_and_uses_invoice_snapshot(self):
@@ -75,7 +75,7 @@ class CheckoutTests(unittest.IsolatedAsyncioTestCase):
         data={'id':'purchase','status':'CONFIRMED','amount':324.42,'currency':'RUB'}
         result=settle_payment('purchase',data)
         self.assertEqual(result['purpose'],'purchase')
-        self.assertEqual(db.get_user(2)['balance'],50)
+        self.assertEqual(db.get_user(2)['balance'],0)
         self.assertEqual(db.get_user(2)['total_spent'],299)
         self.assertEqual(db.get_user(2)['purchases_count'],1)
         self.assertIsNone(settle_payment('purchase',data))
@@ -84,7 +84,7 @@ class CheckoutTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((purchase['product_name'],purchase['price']),('Plugin',299))
             self.assertEqual(conn.execute('SELECT COUNT(*) FROM orders').fetchone()[0],1)
             self.assertEqual(conn.execute('SELECT purchase_id FROM payments').fetchone()[0],purchase['id'])
-            self.assertEqual(conn.execute('SELECT COUNT(*) FROM balance_log').fetchone()[0],1)
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM balance_log').fetchone()[0],2)
 
     async def test_failed_order_write_rolls_back_purchase_and_can_retry(self):
         await self.invoice()
@@ -98,7 +98,7 @@ class CheckoutTests(unittest.IsolatedAsyncioTestCase):
             conn.execute('DROP TRIGGER fail_order')
         self.assertEqual(db.get_user(2)['total_spent'],0)
         self.assertIsNotNone(settle_payment('purchase',data))
-        self.assertEqual(db.get_user(2)['balance'],50)
+        self.assertEqual(db.get_user(2)['balance'],0)
 
     async def test_purchase_notification_is_not_balance_topup_and_is_sent_once(self):
         await self.invoice()

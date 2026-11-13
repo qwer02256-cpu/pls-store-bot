@@ -1,4 +1,5 @@
-"""Atomic, idempotent settlement of a confirmed Platega top-up."""
+"""Atomic settlement of confirmed Platega top-ups and balance-first purchases."""
+
 from decimal import Decimal, InvalidOperation
 
 from services.db import db
@@ -12,7 +13,7 @@ def money(value) -> Decimal:
     if not amount.is_finite() or amount <= 0:
         raise ValueError("Payment amount must be positive")
     try:
-        rounded = amount.quantize(Decimal('0.01'))
+        rounded = amount.quantize(Decimal("0.01"))
     except InvalidOperation:
         raise ValueError("Payment amount is out of range") from None
     if amount != rounded:
@@ -23,86 +24,186 @@ def money(value) -> Decimal:
 def currency_code(value) -> str:
     # ISO 4217 numeric RUB and the historical RUR spelling identify the same currency.
     code = str(value).strip().upper()
-    return 'RUB' if code in {'RUB', 'RUR', '643'} else code
+    return "RUB" if code in {"RUB", "RUR", "643"} else code
 
 
 def settle_payment(tx_id: str, data: dict):
     """Return settlement details once; roll back balance, logs and status together."""
-    if str(data.get('status', '')).upper() != 'CONFIRMED':
-        raise ValueError('Payment is not confirmed')
-    provider_id = data.get('transactionId') or data.get('id')
+    if str(data.get("status", "")).upper() != "CONFIRMED":
+        raise ValueError("Payment is not confirmed")
+    provider_id = data.get("transactionId") or data.get("id")
     if provider_id is not None and str(provider_id) != tx_id:
-        raise ValueError('Transaction ID mismatch')
+        raise ValueError("Transaction ID mismatch")
     with db() as conn:
-        conn.execute('BEGIN IMMEDIATE')
-        row = conn.execute('SELECT * FROM payments WHERE platega_id=?', (tx_id,)).fetchone()
-        if row is None or row['status'] == 'CONFIRMED':
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT * FROM payments WHERE platega_id=?", (tx_id,)
+        ).fetchone()
+        if row is None or row["status"] == "CONFIRMED":
             return None
-        amount = money(row['amount'])
-        details = data.get('paymentDetails') or data
+        amount = money(row["amount"])
+        details = data.get("paymentDetails") or data
         if not isinstance(details, dict):
-            raise ValueError('Invalid payment details')
+            raise ValueError("Invalid payment details")
         # The provider total may include a payer-side surcharge. Credit only
         # the locally recorded invoice principal, never the surcharge.
-        if 'amount' in details and money(details['amount']) < amount:
-            raise ValueError('Payment amount is below invoice amount')
-        if details.get('currency') and currency_code(details['currency']) != currency_code(row['currency']):
-            raise ValueError('Payment currency mismatch')
-        user_id = row['user_id']
-        user = conn.execute('SELECT * FROM users WHERE user_id=?', (user_id,)).fetchone()
+        if "amount" in details and money(details["amount"]) < amount:
+            raise ValueError("Payment amount is below invoice amount")
+        if details.get("currency") and currency_code(
+            details["currency"]
+        ) != currency_code(row["currency"]):
+            raise ValueError("Payment currency mismatch")
+        user_id = row["user_id"]
+        user = conn.execute(
+            "SELECT * FROM users WHERE user_id=?", (user_id,)
+        ).fetchone()
         if user is None:
-            raise ValueError('Payment user does not exist')
-        if row['purpose'] == 'purchase':
-            if not row['product_id'] or not row['product_name']:
-                raise ValueError('Purchase invoice has no product snapshot')
-            purchase = conn.execute(
-                'INSERT INTO purchases(user_id,product_id,price,product_name) VALUES(?,?,?,?)',
-                (user_id,row['product_id'],float(amount),row['product_name']),
+            raise ValueError("Payment user does not exist")
+        if row["purpose"] == "purchase":
+            if not row["product_id"] or not row["product_name"]:
+                raise ValueError("Purchase invoice has no product snapshot")
+            from services.checkout import record_purchase, balance_money
+
+            price = (
+                money(row["product_price"])
+                if row["product_price"] is not None
+                else amount
             )
-            from services.licenses import issue
-            issue(conn,user_id,row["product_id"],purchase.lastrowid)
-            conn.execute(
-                'UPDATE users SET total_spent=total_spent+?, purchases_count=purchases_count+1 WHERE user_id=?',
-                (float(amount),user_id),
+            if price < amount:
+                raise ValueError("Invoice principal exceeds product price")
+            checkout = None
+            if row["checkout_id"]:
+                checkout = conn.execute(
+                    "SELECT * FROM checkouts WHERE id=?", (row["checkout_id"],)
+                ).fetchone()
+                if (
+                    not checkout
+                    or checkout["user_id"] != user_id
+                    or checkout["product_id"] != row["product_id"]
+                    or money(checkout["price"]) != price
+                    or checkout["product_name"] != row["product_name"]
+                ):
+                    raise ValueError("Checkout snapshot mismatch")
+            balance = balance_money(user["balance"])
+            debit = price - amount
+            if (checkout and checkout["purchase_id"] is not None) or balance < debit:
+                # The user may spend their unchanged balance while an invoice is open.
+                # Preserve every paid ruble; never overdraw or issue a second license.
+                new_balance = balance + amount
+                conn.execute(
+                    "UPDATE users SET balance=? WHERE user_id=?",
+                    (float(new_balance), user_id),
+                )
+                conn.execute(
+                    "INSERT INTO balance_log(user_id,delta,reason,payment_id) VALUES(?,?,?,?)",
+                    (
+                        user_id,
+                        float(amount),
+                        "Unused purchase payment credited to balance",
+                        row["id"],
+                    ),
+                )
+                conn.execute(
+                    "UPDATE payments SET status='CONFIRMED',confirmed_at=CURRENT_TIMESTAMP WHERE id=?",
+                    (row["id"],),
+                )
+                return dict(
+                    purpose="purchase_credit",
+                    user_id=user_id,
+                    amount=float(amount),
+                    balance=float(new_balance),
+                    product_name=row["product_name"],
+                    referrer_id=None,
+                    referral_bonus=0,
+                    credit_reason=(
+                        "already_completed"
+                        if checkout and checkout["purchase_id"] is not None
+                        else "balance_changed"
+                    ),
+                    remaining=float(max(price - new_balance, Decimal(0))),
+                    checkout_id=row["checkout_id"],
+                    product_id=row["product_id"],
+                )
+            result = record_purchase(
+                conn,
+                user,
+                row["product_id"],
+                row["product_name"],
+                price,
+                debit,
+                row["id"],
             )
-            conn.execute(
-                "INSERT INTO orders(user_id,username,product_id,status) VALUES(?,?,?,'completed')",
-                (user_id,user['username'],row['product_id']),
-            )
+            if checkout:
+                conn.execute(
+                    "UPDATE checkouts SET purchase_id=? WHERE id=?",
+                    (result["purchase_id"], checkout["id"]),
+                )
             conn.execute(
                 "UPDATE payments SET status='CONFIRMED',confirmed_at=CURRENT_TIMESTAMP,purchase_id=? WHERE id=?",
-                (purchase.lastrowid,row['id']),
+                (result["purchase_id"], row["id"]),
             )
-            return dict(purpose='purchase',user_id=user_id,amount=float(amount),balance=user['balance'],
-                        purchase_id=purchase.lastrowid,product_name=row['product_name'],
-                        referrer_id=None,referral_bonus=0)
-        if row['purpose'] != 'topup':
-            raise ValueError('Unknown payment purpose')
-        balance = float((Decimal(str(user['balance'])) + amount).quantize(Decimal('0.01')))
-        conn.execute('UPDATE users SET balance=? WHERE user_id=?', (balance, user_id))
-        conn.execute('INSERT INTO balance_log(user_id, delta, reason, payment_id) VALUES (?, ?, ?, ?)',
-                     (user_id, float(amount), f'Platega topup {tx_id}', row['id']))
+            return result
+        if row["purpose"] != "topup":
+            raise ValueError("Unknown payment purpose")
+        balance = float(
+            (Decimal(str(user["balance"])) + amount).quantize(Decimal("0.01"))
+        )
+        conn.execute("UPDATE users SET balance=? WHERE user_id=?", (balance, user_id))
+        conn.execute(
+            "INSERT INTO balance_log(user_id, delta, reason, payment_id) VALUES (?, ?, ?, ?)",
+            (user_id, float(amount), f"Platega topup {tx_id}", row["id"]),
+        )
         bonus = Decimal(0)
-        referrer_id = user['referrer_id']
+        referrer_id = user["referrer_id"]
         if referrer_id and referrer_id != user_id:
-            setting = conn.execute("SELECT value FROM bot_settings WHERE key='referral_percent'").fetchone()
+            setting = conn.execute(
+                "SELECT value FROM bot_settings WHERE key='referral_percent'"
+            ).fetchone()
             try:
-                percent = Decimal(setting['value'] if setting else '10')
+                percent = Decimal(setting["value"] if setting else "10")
             except InvalidOperation:
-                raise ValueError('Invalid referral percentage') from None
+                raise ValueError("Invalid referral percentage") from None
             if not percent.is_finite() or not 0 <= percent <= 100:
-                raise ValueError('Invalid referral percentage')
-            bonus = (amount * percent / 100).quantize(Decimal('0.01'))
+                raise ValueError("Invalid referral percentage")
+            bonus = (amount * percent / 100).quantize(Decimal("0.01"))
             if bonus > 0:
-                referrer = conn.execute('SELECT * FROM users WHERE user_id=?', (referrer_id,)).fetchone()
+                referrer = conn.execute(
+                    "SELECT * FROM users WHERE user_id=?", (referrer_id,)
+                ).fetchone()
                 if referrer is None:
-                    raise ValueError('Referrer does not exist')
-                ref_balance = float((Decimal(str(referrer['balance'])) + bonus).quantize(Decimal('0.01')))
-                earnings = float((Decimal(str(referrer['referral_earnings'])) + bonus).quantize(Decimal('0.01')))
-                conn.execute('UPDATE users SET balance=?, referral_earnings=? WHERE user_id=?',
-                             (ref_balance, earnings, referrer_id))
-                conn.execute('INSERT INTO balance_log(user_id, delta, reason, payment_id) VALUES (?, ?, ?, ?)',
-                             (referrer_id, float(bonus), f'Referral {user_id} topup {tx_id}', row['id']))
-        conn.execute("UPDATE payments SET status='CONFIRMED', confirmed_at=CURRENT_TIMESTAMP WHERE id=?", (row['id'],))
-        return dict(purpose='topup', user_id=user_id, amount=float(amount), balance=balance,
-                    referrer_id=referrer_id, referral_bonus=float(bonus))
+                    raise ValueError("Referrer does not exist")
+                ref_balance = float(
+                    (Decimal(str(referrer["balance"])) + bonus).quantize(
+                        Decimal("0.01")
+                    )
+                )
+                earnings = float(
+                    (Decimal(str(referrer["referral_earnings"])) + bonus).quantize(
+                        Decimal("0.01")
+                    )
+                )
+                conn.execute(
+                    "UPDATE users SET balance=?, referral_earnings=? WHERE user_id=?",
+                    (ref_balance, earnings, referrer_id),
+                )
+                conn.execute(
+                    "INSERT INTO balance_log(user_id, delta, reason, payment_id) VALUES (?, ?, ?, ?)",
+                    (
+                        referrer_id,
+                        float(bonus),
+                        f"Referral {user_id} topup {tx_id}",
+                        row["id"],
+                    ),
+                )
+        conn.execute(
+            "UPDATE payments SET status='CONFIRMED', confirmed_at=CURRENT_TIMESTAMP WHERE id=?",
+            (row["id"],),
+        )
+        return dict(
+            purpose="topup",
+            user_id=user_id,
+            amount=float(amount),
+            balance=balance,
+            referrer_id=referrer_id,
+            referral_bonus=float(bonus),
+        )

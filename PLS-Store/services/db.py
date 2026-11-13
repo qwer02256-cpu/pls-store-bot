@@ -113,6 +113,7 @@ def init_db() -> None:
         for column, declaration in {
             "purpose": "TEXT NOT NULL DEFAULT 'topup'",
             "product_id": "INTEGER", "product_name": "TEXT", "purchase_id": "INTEGER",
+            "product_price": "REAL", "checkout_id": "TEXT",
         }.items():
             if column not in payment_cols:
                 conn.execute(f"ALTER TABLE payments ADD COLUMN {column} {declaration}")
@@ -172,6 +173,14 @@ def init_db() -> None:
                 user_id INTEGER NOT NULL,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(promo_id, user_id)
+            )
+        """)
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS checkouts (
+                id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, product_id INTEGER NOT NULL,
+                product_name TEXT NOT NULL, price REAL NOT NULL,
+                purchase_id INTEGER UNIQUE, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
         """)
 

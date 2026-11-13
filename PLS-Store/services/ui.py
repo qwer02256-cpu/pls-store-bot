@@ -125,7 +125,7 @@ def topup_amounts_kb(lang: str = "ru") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def payment_methods_kb(amount, lang: str = 'ru', product_id: int | None = None) -> InlineKeyboardMarkup:
+def payment_methods_kb(amount, lang: str = 'ru', product_id: int | None = None, checkout_id: str | None = None) -> InlineKeyboardMarkup:
     from services.payment_options import METHOD_FEES, method_info
     fee_word = {'ru': 'комиссия', 'uk': 'комісія', 'en': 'fee'}.get(lang, 'комиссия')
     rows = []
@@ -134,7 +134,7 @@ def payment_methods_kb(amount, lang: str = 'ru', product_id: int | None = None) 
         icon = '💳' if method == 2 else '💰'
         rows.append([InlineKeyboardButton(
             text=f'{icon} {label} · {fee_word} {fee}%',
-            callback_data=(f'purchasepay:{method}:{product_id}' if product_id is not None else f'topupmethod:{method}:{amount:.2f}'),
+            callback_data=((f'purchasepay:{method}:{product_id}' + (f':{checkout_id}' if checkout_id else '')) if product_id is not None else f'topupmethod:{method}:{amount:.2f}'),
         )])
     back = '« Back' if lang == 'en' else '« Назад'
     rows.append([design_button('btn_back', back, f'product:{product_id}' if product_id is not None else 'topup', 'danger', text_override=back)])

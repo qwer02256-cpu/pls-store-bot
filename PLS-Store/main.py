@@ -9,6 +9,8 @@ import html
 import logging
 import os
 import re
+import secrets
+import hashlib
 from urllib.parse import urlsplit
 from pathlib import Path
 
@@ -70,6 +72,8 @@ from handlers.licenses import router as license_router, deliver, retry_deliverie
 from services.platega import PlategaClient, PlategaError
 from services.emoji import PackEmojiMiddleware
 from services.payment_ledger import settle_payment, money
+from services.checkout import prepare_checkout, balance_checkout
+from services.checkout_ui import quote_text, receipt_text, credit_text
 from services.payment_monitor import monitor_payments
 from services.payment_options import METHOD_FEES, method_info
 from services.documents import document_rows, DEFAULT_URLS, valid_url as valid_document_url
@@ -724,7 +728,7 @@ async def cb_product(callback: CallbackQuery):
     text = build_product_caption(product, lang=get_user_language(callback.from_user.id))
     price_rub = parse_price_rub(product["price"], product)
     rows = [
-        [InlineKeyboardButton(text=tr(callback.from_user.id, "buy", price=price_rub), callback_data=f"buyproduct:{product_id}")],
+        [InlineKeyboardButton(text=tr(callback.from_user.id, "buy", price=price_rub), callback_data=f"buyproduct:{product_id}:{secrets.token_hex(12)}")],
         [InlineKeyboardButton(text=tr(callback.from_user.id, "back_catalog"), callback_data="catalog:plugins")],
         [InlineKeyboardButton(text=tr(callback.from_user.id, "home"), callback_data="home")],
     ]
@@ -740,41 +744,98 @@ async def cb_product(callback: CallbackQuery):
     await safe_edit_or_send(callback, text, reply_markup=keyboard, photo=photo)
 
 
+def product_checkout_token(user, message, pid, token=None):
+    if token is not None:
+        return token
+    message_id = getattr(message, "message_id", None)
+    if isinstance(message_id, int):
+        return hashlib.sha256(
+            f"legacy:{user.id}:{pid}:{message_id}".encode()
+        ).hexdigest()[:24]
+    return secrets.token_hex(12)
+
+
+async def begin_product_checkout(message, user, product, bot, token=None):
+    ensure_user(user.id, user.username, user.first_name)
+    token = product_checkout_token(user, message, product["id"], token)
+    try:
+        prepare_checkout(user.id, product["id"], token)
+        quote = balance_checkout(user.id, token)
+    except ValueError:
+        await message.answer(
+            {
+                "ru": "Товар недоступен или ещё не готов к автоматической выдаче. Откройте карточку товара заново.",
+                "uk": "Товар недоступний або ще не готовий до автоматичної видачі. Відкрийте картку товару знову.",
+                "en": "This product is unavailable or not ready for delivery. Reopen the product.",
+            }[get_user_language(user.id)]
+        )
+        return None
+    if quote["completed"]:
+        if quote["result"] is not None:
+            await notify_purchase(quote["result"], bot)
+        else:
+            await message.answer(
+                {
+                    "ru": "Эта покупка уже оплачена. Файл и ключ — в разделе «Лицензии».",
+                    "uk": "Цю покупку вже оплачено. Файл і ключ — у розділі «Ліцензії».",
+                    "en": "This checkout is already paid. Find your file and key in Licenses.",
+                }[get_user_language(user.id)]
+            )
+        return None
+    return quote
+
+
 # ─── direct product checkout ───────────────────────────────────────────────
 @dp.callback_query(F.data.startswith("buyproduct:"))
 @dp.callback_query(F.data.startswith("buybal:"))
 @dp.callback_query(F.data.startswith("buyok:"))
 @dp.callback_query(F.data.startswith("buy:"))
 async def cb_buy_balance(callback: CallbackQuery, bot: Bot):
-    # Old purchase/manual buttons also lead to the current checkout.
     await callback.answer()
     if not has_accepted_license(callback.from_user.id):
         await show_license_gate(callback, callback.from_user.id)
         return
     try:
-        product_id = int(callback.data.split(":", 1)[1])
+        parts = callback.data.split(":")
+        if len(parts) not in (2, 3):
+            raise ValueError()
+        product_id = int(parts[1])
+        token = parts[2] if len(parts) == 3 else None
     except (ValueError, IndexError):
         return
     product = get_product(product_id)
     if not product or not product.get("active", 1):
         await callback.message.answer(tr(callback.from_user.id, "unavailable"))
         return
-    user = callback.from_user
-    ensure_user(user.id, user.username, user.first_name)
-    try:
-        price = money(parse_price_rub(product["price"], product))
-    except ValueError:
-        await callback.message.answer(tr(user.id, "unavailable"))
+    quote = await begin_product_checkout(
+        callback.message, callback.from_user, product, bot, token
+    )
+    if quote is None:
         return
-    await safe_edit_or_send(callback,
-        tr(user.id, "purchase_method_choose", product=safe_stored_html(product["name"]), amount=price),
-        reply_markup=payment_methods_kb(price, get_user_language(user.id), product_id=product_id))
+    checkout = quote["checkout"]
+    lang = get_user_language(callback.from_user.id)
+    await safe_edit_or_send(
+        callback,
+        quote_text(
+            lang,
+            checkout["product_name"],
+            checkout["price"],
+            quote["balance_part"],
+            quote["remaining"],
+        ),
+        reply_markup=payment_methods_kb(
+            quote["remaining"], lang, product_id=product_id, checkout_id=checkout["id"]
+        ),
+    )
 
 
 @dp.callback_query(F.data.startswith("purchasepay:"))
 async def cb_purchase_method(callback: CallbackQuery, bot: Bot):
     try:
-        _, method_raw, product_raw = callback.data.split(":")
+        parts=callback.data.split(':')
+        if len(parts) not in (3,4): raise ValueError()
+        _,method_raw,product_raw=parts[:3]
+        token=parts[3] if len(parts)==4 else None
         method, product_id = int(method_raw), int(product_raw)
         if method not in METHOD_FEES:
             raise ValueError("Unsupported method")
@@ -795,7 +856,7 @@ async def cb_purchase_method(callback: CallbackQuery, bot: Bot):
         await callback.message.answer(tr(callback.from_user.id, "unavailable"))
         return
     await create_payment_invoice(callback.message, callback.from_user, price, bot,
-                                 payment_method=method, product=product)
+                                 payment_method=method, product=product, checkout_id=token)
 
 
 # ─── profile ────────────────────────────────────────────────────────────────
@@ -999,7 +1060,7 @@ async def create_topup(message: Message, user, amount: float, bot: Bot, payment_
     return await create_payment_invoice(message, user, amount, bot, payment_method=payment_method)
 
 
-async def create_payment_invoice(message: Message, user, amount, bot: Bot, payment_method: int = 2, product=None):
+async def create_payment_invoice(message: Message, user, amount, bot: Bot, payment_method: int = 2, product=None, checkout_id=None):
     if payment_method not in METHOD_FEES:
         await message.answer(tr(user.id, "payment_method_invalid"))
         return
@@ -1012,13 +1073,14 @@ async def create_payment_invoice(message: Message, user, amount, bot: Bot, payme
     if amount < minimum:
         await message.answer(tr(user.id, "minimum", amount=float(minimum)))
         return
+    quote=None
     if product is not None:
-        from services.license_files import ready
-        with db() as conn:
-            available = ready(conn, product['id'])
-        if not available:
-            await message.answer('Товар готовится к автоматической выдаче. Файл, инструкция или адрес проверки ещё не настроены. Обратитесь в поддержку.')
-            return
+        quote=await begin_product_checkout(message,user,product,bot,checkout_id)
+        if quote is None: return
+        amount=quote['remaining']
+        checkout=quote['checkout']
+        product=dict(product,id=checkout['product_id'],name=checkout['product_name'])
+        checkout_id=checkout['id']
     ensure_user(user.id, user.username, user.first_name)
     if not platega:
         await message.answer(
@@ -1063,11 +1125,12 @@ async def create_payment_invoice(message: Message, user, amount, bot: Bot, payme
     tx_id = str(tx_id)
     with db() as conn:
         conn.execute(
-            "INSERT INTO payments (user_id, amount, platega_id, status, payload, redirect_url, purpose, product_id, product_name) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO payments (user_id, amount, platega_id, status, payload, redirect_url, purpose, product_id, product_name, product_price, checkout_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (user.id, amount, tx_id, "PENDING", payload, redirect, purpose,
              product["id"] if product is not None else None,
-             product["name"] if product is not None else None),
+             product["name"] if product is not None else None,
+             quote["checkout"]["price"] if quote else None,checkout_id),
         )
     rows = []
     if redirect:
@@ -1081,7 +1144,7 @@ async def create_payment_invoice(message: Message, user, amount, bot: Bot, payme
     invoice_text = tr(user.id, "invoice", amount=amount, tx_id=tx_id)
     fee_text = tr(user.id, "payment_method_details", method=label, fee=fee, amount=amount)
     if product is not None:
-        invoice_text = tr(user.id, "purchase_invoice", product=safe_stored_html(product["name"]), amount=amount, tx_id=tx_id)
+        invoice_text = quote_text(get_user_language(user.id),product["name"],quote["checkout"]["price"],quote["balance_part"],amount,tx_id)
         fee_text = tr(user.id, "purchase_fee_details", method=label, fee=fee)
     await message.answer(
         invoice_text + "\n\n" + fee_text,
@@ -1132,6 +1195,69 @@ async def cb_pay_status(callback: CallbackQuery, bot: Bot):
                 await callback.message.answer(f"<pre>{html.escape(diagnostic)}</pre>")
 
 
+async def notify_purchase(result, bot):
+    user_id = result["user_id"]
+    amount = result["amount"]
+    with db() as conn:
+        license_row = conn.execute(
+            "SELECT id FROM licenses WHERE purchase_id=?", (result["purchase_id"],)
+        ).fetchone()
+    if license_row:
+        try:
+            await deliver(bot, license_row["id"], user_id)
+        except Exception as exc:
+            log.warning("License delivery pending: %s", type(exc).__name__)
+    try:
+        await bot.send_message(
+            user_id,
+            tr(
+                user_id,
+                "purchase_paid",
+                product=safe_stored_html(result["product_name"]),
+                amount=amount,
+            )
+            + "\n\n"
+            + receipt_text(
+                get_user_language(user_id),
+                result["balance_debit"],
+                result["external_amount"],
+                result["balance"],
+            ),
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text={
+                                "ru": "🔑 Лицензии",
+                                "uk": "🔑 Ліцензії",
+                                "en": "🔑 Licenses",
+                            }[get_user_language(user_id)],
+                            callback_data="licenses",
+                        )
+                    ],
+                    [
+                        InlineKeyboardButton(
+                            text=tr(user_id, "home"), callback_data="home"
+                        )
+                    ],
+                ]
+            ),
+        )
+    except Exception:
+        log.warning("Purchase recorded but buyer notification failed")
+    if ADMIN_ID:
+        try:
+            await bot.send_message(
+                ADMIN_ID,
+                f"✅ <b>Оплачена покупка #{result['purchase_id']}</b>\n"
+                f"Товар: {safe_stored_html(result['product_name'])}\n"
+                f"Цена: {amount:.2f}₽\nПокупатель: <code>{user_id}</code>",
+            )
+        except Exception:
+            log.warning("Purchase recorded but admin notification failed")
+    return True
+
+
 async def process_confirmed_payment(tx_id: str, data: dict, bot: Bot) -> bool:
     result = settle_payment(tx_id, data)
     if result is None:
@@ -1139,30 +1265,18 @@ async def process_confirmed_payment(tx_id: str, data: dict, bot: Bot) -> bool:
     user_id = result["user_id"]
     amount = result["amount"]
     if result["purpose"] == "purchase":
-        with db() as conn:
-            license_row = conn.execute('SELECT id FROM licenses WHERE purchase_id=?', (result['purchase_id'],)).fetchone()
-        if license_row:
-            try:
-                await deliver(bot, license_row['id'], user_id)
-            except Exception as exc:
-                log.warning('License delivery pending: %s', type(exc).__name__)
+        return await notify_purchase(result, bot)
+    if result["purpose"] == "purchase_credit":
+        lang=get_user_language(user_id)
+        text=credit_text(lang,amount,result['balance'],result['credit_reason'],result['remaining'])
+        callback=(f"buyproduct:{result['product_id']}:{result['checkout_id']}" if result['checkout_id'] else f"product:{result['product_id']}")
         try:
-            await bot.send_message(user_id,
-                tr(user_id, "purchase_paid", product=safe_stored_html(result["product_name"]), amount=amount),
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text={"ru":"🔑 Лицензии","uk":"🔑 Ліцензії","en":"🔑 Licenses"}[get_user_language(user_id)], callback_data="licenses")],
-                    [InlineKeyboardButton(text=tr(user_id, "home"), callback_data="home")],
-                ]))
+            await bot.send_message(user_id,text,reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                *([[InlineKeyboardButton(text={'ru':'Продолжить покупку','uk':'Продовжити покупку','en':'Continue purchase'}[lang],callback_data=callback)]] if result['credit_reason']=='balance_changed' else []),
+                [InlineKeyboardButton(text={'ru':'Лицензии','uk':'Ліцензії','en':'Licenses'}[lang],callback_data='licenses')],
+            ]))
         except Exception:
-            log.warning("Purchase recorded but buyer notification failed")
-        if ADMIN_ID:
-            try:
-                await bot.send_message(ADMIN_ID,
-                    f"✅ <b>Оплачена покупка #{result['purchase_id']}</b>\n"
-                    f"Товар: {safe_stored_html(result['product_name'])}\n"
-                    f"Цена: {amount:.2f}₽\nПокупатель: <code>{user_id}</code>")
-            except Exception:
-                log.warning("Purchase recorded but admin notification failed")
+            log.warning('Unused purchase payment credited but notification failed')
         return True
     new_bal = result["balance"]
     try:
