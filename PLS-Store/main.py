@@ -502,7 +502,8 @@ def build_product_caption(product, *, max_desc: int = 420, lang: str = "ru") -> 
     if re.search(r"\w", plain_stored_text(license_text)):
         lines.append(f"📜 {html.escape(license_text)}")
     license_label = {"ru": "Лицензионное соглашение", "en": "License Agreement", "uk": "Ліцензійна угода"}.get(lang, "Лицензионное соглашение")
-    lines.append(f'{agreement_emoji_html()}<a href="{html.escape(document_url("license"), quote=True)}">{license_label}</a>')
+    license_link_text = {"ru": "жми", "en": "click", "uk": "тисни"}.get(lang, "жми")
+    lines.append(f'{agreement_emoji_html()}{license_label}: <a href="{html.escape(document_url("license"), quote=True)}">{license_link_text}</a>')
     return "\n\n".join(lines)
 
 
