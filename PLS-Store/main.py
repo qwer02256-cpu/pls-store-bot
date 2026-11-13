@@ -69,6 +69,9 @@ from services.db import (
     set_user_language,
 )
 from handlers.licenses import router as license_router, deliver, retry_deliveries
+from handlers.marketing import router as marketing_router
+from services.pricing import product_price, price_label, percent
+from services.broadcasts import worker as broadcast_worker
 from services.platega import PlategaClient, PlategaError
 from services.emoji import PackEmojiMiddleware
 from services.payment_ledger import settle_payment, money
@@ -158,7 +161,7 @@ I18N = {
         "language_saved": "Язык изменён на русский.", "back": "⬅️ Назад", "home": "🏠 Главное меню",
         "shop": "🛒 Магазин PLS Store", "no_products": "Пока товаров нет. Загляни позже или напиши в поддержку.",
         "choose_product": "Выбери интересующий товар:", "unavailable": "Этот товар больше недоступен.",
-        "buy": "🛒 Купить за {price:.0f}₽", "manual": "📩 Оставить заявку (вручную)", "back_catalog": "⬅️ Назад в каталог",
+        "buy": "🛒 Купить за {price:.2f}₽", "manual": "📩 Оставить заявку (вручную)", "back_catalog": "⬅️ Назад в каталог",
         "purchases": "🛒 <b>Мои покупки</b>", "empty_purchases": "Пока пусто. Загляните в магазин!",
         "balance": "💰 Баланс", "spent": "💸 Всего потрачено", "purchase_count": "🛒 Покупок",
         "promo_enter": "🎟 Введите промокод:", "promo_bad": "Промокод не найден или неактивен.",
@@ -185,7 +188,7 @@ I18N = {
         "language_saved": "Language changed to English.", "back": "⬅️ Back", "home": "🏠 Main menu",
         "shop": "🛒 PLS Store", "no_products": "There are no products yet. Please check back later or contact support.",
         "choose_product": "Choose a product:", "unavailable": "This product is no longer available.",
-        "buy": "🛒 Buy for {price:.0f}₽", "manual": "📩 Request manually", "back_catalog": "⬅️ Back to catalog",
+        "buy": "🛒 Buy for {price:.2f}₽", "manual": "📩 Request manually", "back_catalog": "⬅️ Back to catalog",
         "purchases": "🛒 <b>My purchases</b>", "empty_purchases": "No purchases yet. Visit the shop!",
         "balance": "💰 Balance", "spent": "💸 Total spent", "purchase_count": "🛒 Purchases",
         "promo_enter": "🎟 Enter promo code:", "promo_bad": "Promo code not found or inactive.",
@@ -218,7 +221,7 @@ I18N["uk"] = {'welcome': '<b>PLS Store</b>\n🏠 <b>Головне меню</b>\
  'no_products': 'Товарів поки немає. Завітайте пізніше або напишіть у підтримку.',
  'choose_product': 'Виберіть товар:',
  'unavailable': 'Цей товар більше недоступний.',
- 'buy': '🛒 Купити за {price:.0f}₽',
+ 'buy': '🛒 Купити за {price:.2f}₽',
  'manual': '📩 Залишити заявку (вручну)',
  'back_catalog': '⬅️ Назад до каталогу',
  'purchases': '🛒 <b>Мої покупки</b>',
@@ -477,7 +480,10 @@ def build_product_caption(product, *, max_desc: int = 420, lang: str = "ru") -> 
     if len(desc) > max_desc:
         desc = desc[: max_desc - 1] + "…"
     desc = safe_stored_html(desc)
-    price = html.escape(product["price"] or "")
+    price = html.escape(product['price'] or '')
+    sale=percent(product.get('discount_percent',0))
+    if sale:
+        price=f"<s>{price}</s> → {product_price(product):.2f}₽ (−{sale:g}%)"
     lines = [f"💎 <b>{name}</b>\n", f"<blockquote>{desc}</blockquote>\n"]
     if product.get("article_url"):
         lines.append(f"📄 {'Article' if lang == 'en' else 'Статья'}:\n{html.escape(product['article_url'])}")
@@ -591,9 +597,9 @@ async def render_plugins(target) -> None:
             ver = (product["version"] or "").strip() if product["version"] else ""
             if ver:
                 ver_disp = ver if ver.lower().startswith("v") else f"v{ver}"
-                title = f"{plain_stored_text(product['name'])} {ver_disp} — {product['price']}"
+                title = f"{plain_stored_text(product['name'])} {ver_disp} — {price_label(product)}"
             else:
-                title = f"{plain_stored_text(product['name'])} — {product['price']}"
+                title = f"{plain_stored_text(product['name'])} — {price_label(product)}"
             builder.button(text=title[:64], callback_data=f"product:{product['id']}")
         builder.add(design_button("btn_back", tr(target.from_user.id, "back"), "catalog", "danger"))
         builder.adjust(1)
@@ -607,6 +613,7 @@ async def render_plugins(target) -> None:
 # ─── dispatcher ─────────────────────────────────────────────────────────────
 dp = Dispatcher(storage=MemoryStorage())
 dp.include_router(license_router)
+dp.include_router(marketing_router)
 
 
 @dp.message(Command("testdocs"))
@@ -698,8 +705,12 @@ async def cb_product(callback: CallbackQuery):
         await safe_edit_or_send(callback, tr(callback.from_user.id, "unavailable"), reply_markup=back_kb("catalog", get_user_language(callback.from_user.id)))
         return
 
-    text = build_product_caption(product, lang=get_user_language(callback.from_user.id))
-    price_rub = parse_price_rub(product["price"], product)
+    try:
+        text = build_product_caption(product, lang=get_user_language(callback.from_user.id))
+        price_rub = product_price(product)
+    except ValueError:
+        await screen_reply(callback,tr(callback.from_user.id,'unavailable'))
+        return
     rows = [
         [InlineKeyboardButton(text=tr(callback.from_user.id, "buy", price=price_rub), callback_data=f"buyproduct:{product_id}:{secrets.token_hex(12)}")],
         [InlineKeyboardButton(text=tr(callback.from_user.id, "back_catalog"), callback_data="catalog:plugins")],
@@ -824,7 +835,7 @@ async def cb_purchase_method(callback: CallbackQuery, bot: Bot):
         await screen_reply(callback,tr(callback.from_user.id, "unavailable"))
         return
     try:
-        price = money(parse_price_rub(product["price"], product))
+        price = product_price(product)
     except ValueError:
         await screen_reply(callback,tr(callback.from_user.id, "unavailable"))
         return
@@ -1367,6 +1378,7 @@ async def cb_reviews(callback: CallbackQuery):
 def admin_home_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔑 Лицензии", callback_data="adm:licenses")],
+        [InlineKeyboardButton(text="📣 Рассылка",callback_data="adm:broadcasts",style="primary"),InlineKeyboardButton(text="🏷 Скидки",callback_data="adm:discounts",style="success")],
         [
             InlineKeyboardButton(text="🧩 Товары", callback_data="adm:products"),
             InlineKeyboardButton(text="➕ Добавить", callback_data="adm:add"),
@@ -1885,6 +1897,7 @@ async def adm_product_open(callback: CallbackQuery):
             InlineKeyboardButton(text="💰 Цена", callback_data=f"adm:edit:{pid}:price"),
         ],
         [InlineKeyboardButton(text="📝 Описание", callback_data=f"adm:edit:{pid}:description")],
+        [InlineKeyboardButton(text="🏷 Скидка",callback_data=f"sale:product:{pid}",style="success")],
         [
             InlineKeyboardButton(
                 text="👁 Скрыть" if product["active"] else "👁 Показать",
@@ -2172,6 +2185,7 @@ async def main():
     setup_autostars()
     runner = await start_callback_server(bot)
     delivery_task = asyncio.create_task(retry_deliveries(bot), name="license-delivery")
+    broadcast_task=asyncio.create_task(broadcast_worker(bot),name="broadcast-worker")
     payment_task = None
     if platega:
         async def on_confirmed(tx_id, data):
@@ -2184,6 +2198,8 @@ async def main():
     try:
         await dp.start_polling(bot)
     finally:
+        broadcast_task.cancel()
+        await asyncio.gather(broadcast_task,return_exceptions=True)
         delivery_task.cancel()
         await asyncio.gather(delivery_task, return_exceptions=True)
         if payment_task:

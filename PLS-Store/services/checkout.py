@@ -1,10 +1,11 @@
 """Balance-first checkout. Quotes never reserve or debit an unpaid balance."""
 
 from decimal import Decimal
-from services.db import db, parse_price_rub
+from services.db import db
 from services.payment_ledger import money
 from services.licenses import issue
 from services.license_files import ready
+from services.pricing import product_price
 
 
 def balance_money(value):
@@ -37,7 +38,7 @@ def prepare_checkout(uid, pid, token):
         ).fetchone()
         if not product or not ready(conn, pid):
             raise ValueError("Товар ещё не готов к автоматической выдаче")
-        price = money(parse_price_rub(product["price"], product))
+        price = product_price(product)
         conn.execute(
             "INSERT INTO checkouts(id,user_id,product_id,product_name,price) VALUES(?,?,?,?,?)",
             (token, uid, pid, product["name"], float(price)),

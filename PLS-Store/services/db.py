@@ -194,6 +194,20 @@ def init_db() -> None:
         if 'kind' not in {r[1] for r in conn.execute('PRAGMA table_info(chat_screens)')}:
             conn.execute("ALTER TABLE chat_screens ADD COLUMN kind TEXT NOT NULL DEFAULT 'unknown'")
 
+        if 'discount_percent' not in {r[1] for r in conn.execute('PRAGMA table_info(products)')}:
+            conn.execute('ALTER TABLE products ADD COLUMN discount_percent REAL NOT NULL DEFAULT 0')
+        conn.execute("""CREATE TABLE IF NOT EXISTS product_discount_log (
+            id INTEGER PRIMARY KEY,product_id INTEGER NOT NULL,admin_id INTEGER NOT NULL,
+            old_percent REAL NOT NULL,new_percent REAL NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS broadcasts (
+            id INTEGER PRIMARY KEY,admin_id INTEGER NOT NULL,body TEXT NOT NULL,status TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,finished_at TEXT)""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS broadcast_recipients (
+            broadcast_id INTEGER NOT NULL,user_id INTEGER NOT NULL,status TEXT NOT NULL,
+            attempts INTEGER NOT NULL DEFAULT 0,next_attempt_at REAL NOT NULL DEFAULT 0,error TEXT,
+            PRIMARY KEY(broadcast_id,user_id))""")
+        conn.execute('CREATE INDEX IF NOT EXISTS broadcast_pending ON broadcast_recipients(status,next_attempt_at,broadcast_id)')
+
         # seed default design texts if missing
         defaults = {
             "welcome_text": "<b>PLS Store</b>\n🏠 <b>Главное меню</b>\n━━━━━━━━━━━━━━━━━━━━\n\n👋 С возвращением, <b>{first_name}</b>.\n💲 Баланс: <b>{balance}₽</b>\n\nПлагины для FunPayCardinal",
