@@ -179,13 +179,9 @@ class ProductArticleTests(unittest.IsolatedAsyncioTestCase):
         ), patch.object(main, "safe_edit_or_send", new_callable=AsyncMock) as render:
             await main.cb_product(callback)
             rows = render.call_args.kwargs["reply_markup"].inline_keyboard
-            button = next(
-                b
-                for row in rows
-                for b in row
-                if b.callback_data == f"article:{self.pid}:0"
-            )
-            self.assertEqual(button.style, "primary")
+            self.assertFalse(any(
+                (b.callback_data or "").startswith("article:") for row in rows for b in row
+            ))
         callback.data = f"article:{self.pid}:0"
         with patch.object(
             main, "has_accepted_license", return_value=True
@@ -195,7 +191,7 @@ class ProductArticleTests(unittest.IsolatedAsyncioTestCase):
             back = render.call_args.kwargs["reply_markup"].inline_keyboard[-1][0]
             self.assertEqual(back.callback_data, f"product:{self.pid}")
 
-    async def test_published_card_uses_telegraph_button(self):
+    async def test_published_card_uses_inline_article_link_without_extra_button(self):
         async with self.client() as client:
             await publish_article(client)
         callback = SimpleNamespace(
@@ -212,7 +208,10 @@ class ProductArticleTests(unittest.IsolatedAsyncioTestCase):
                 for row in render.call_args.kwargs["reply_markup"].inline_keyboard
                 for b in row
             ]
-            self.assertTrue(any(b.url == self.url for b in buttons))
+            self.assertFalse(any(b.url == self.url for b in buttons))
+            caption = render.call_args.args[1]
+            self.assertIn(f'<a href="{self.url}">📄 Статья</a>', caption)
+            self.assertNotIn(f'Статья:\n{self.url}', caption)
 
     async def test_admin_article_link_rejects_invalid_url_without_saving(self):
         message = SimpleNamespace(

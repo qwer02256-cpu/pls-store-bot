@@ -487,7 +487,8 @@ def build_product_caption(product, *, max_desc: int = 420, lang: str = "ru") -> 
         price=f"<s>{price}</s> → {product_price(product):.2f}₽ (−{sale:g}%)"
     lines = [f"💎 <b>{name}</b>\n", f"<blockquote>{desc}</blockquote>\n"]
     if product.get("article_url"):
-        lines.append(f"📄 {'Article' if lang == 'en' else 'Статья'}:\n{html.escape(product['article_url'])}")
+        label = {"ru": "📄 Статья", "en": "📄 Article", "uk": "📄 Стаття"}.get(lang, "📄 Статья")
+        lines.append(f'<a href="{html.escape(product["article_url"], quote=True)}">{label}</a>')
     if product.get("video_url"):
         lines.append(f"🎥 {'Video review' if lang == 'en' else 'Видео-обзор'}: {html.escape(product['video_url'])}")
     lines.append(f"💰 {'Price' if lang == 'en' else 'Цена'}: <b>{price}</b>")
@@ -717,12 +718,6 @@ async def cb_product(callback: CallbackQuery):
         [InlineKeyboardButton(text=tr(callback.from_user.id, "back_catalog"), callback_data="catalog:plugins")],
         [InlineKeyboardButton(text=tr(callback.from_user.id, "home"), callback_data="home")],
     ]
-    article_url = product.get("article_url")
-    if article_url or is_article_product(product_id):
-        label = {"ru": "📄 Подробнее", "en": "📄 Read more", "uk": "📄 Докладніше"}[get_user_language(callback.from_user.id)]
-        button = (InlineKeyboardButton(text=label, url=article_url, style="primary") if article_url
-                  else InlineKeyboardButton(text=label, callback_data=f"article:{product_id}:0", style="primary"))
-        rows.insert(1, [button])
     keyboard = InlineKeyboardMarkup(inline_keyboard=rows)
     image_path = product.get("image_path")
     photo = None
