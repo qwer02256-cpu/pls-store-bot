@@ -55,11 +55,11 @@ def public_key():
     return dict(n=str(numbers.n), e=numbers.e)
 
 
-def sign_lease(key, funpay_id, now=None):
+def sign_lease(key, funpay_id, now=None, product="autostars"):
     issued = int(time.time() if now is None else now)
     approval = dict(
         v=1,
-        product="autostars",
+        product=product,
         fingerprint=hashlib.sha256(key.encode()).hexdigest(),
         funpay_id=str(funpay_id),
         issued_at=issued,

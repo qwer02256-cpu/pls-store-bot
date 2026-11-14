@@ -17,7 +17,7 @@ def plugin_bytes(file_path):
         path = ROOT / path
     source = path.read_text(encoding="utf-8")
     ast.parse(source)
-    if path.name == "AutoStars.py":
+    if path.name in {"AutoStars.py", "AutoGift.py"}:
         base = urlsplit(LICENSE_PUBLIC_BASE)
         if (
             base.scheme != "https"
@@ -33,7 +33,7 @@ def plugin_bytes(file_path):
             "PLS_LICENSE_GUARD_V1" not in source
             or '"__PLS_LICENSE_ENDPOINT__"' not in source
         ):
-            raise ValueError("AutoStars без проверки лицензий")
+            raise ValueError(f"{path.stem} без проверки лицензий")
         source = source.replace(
             '"__PLS_LICENSE_ENDPOINT__"',
             json.dumps(LICENSE_PUBLIC_BASE + "/licenses/verify"),

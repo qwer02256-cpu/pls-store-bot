@@ -128,7 +128,7 @@ async def verify(request):
             or not 0 < int(fid) < 10**18
         ):
             raise ValueError()
-        if payload["product"] != "autostars":
+        if payload["product"] not in {"autostars", "autogift"}:
             raise ValueError()
     except (ValueError, TypeError):
         return web.json_response({"valid": False}, status=400)
@@ -141,7 +141,7 @@ async def verify(request):
         if (
             not row
             or row["status"] != "active"
-            or Path(row["file_path"]).name != "AutoStars.py"
+            or Path(row["file_path"]).name != {"autostars": "AutoStars.py", "autogift": "AutoGift.py"}[payload["product"]]
         ):
             return web.json_response(
                 {"valid": False}, status=403, headers={"Cache-Control": "no-store"}
@@ -158,6 +158,6 @@ async def verify(request):
     from services.license_leases import sign_lease
 
     return web.json_response(
-        dict(valid=True, perpetual=True, **sign_lease(key, str(int(fid)))),
+        dict(valid=True, perpetual=True, **sign_lease(key, str(int(fid)), product=payload["product"])),
         headers={"Cache-Control": "no-store"},
     )

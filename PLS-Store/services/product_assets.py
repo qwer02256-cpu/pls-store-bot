@@ -43,7 +43,7 @@ def normalize_source(source, autostars=False):
     tree = ast.parse(source)
     if autostars:
         if "PLS_LICENSE_GUARD_V1" not in source:
-            raise ValueError("Нужна версия AutoStars с проверкой лицензий PLS Store")
+            raise ValueError("Нужна версия плагина с проверкой лицензий PLS Store")
         endpoint = next(
             (
                 n
@@ -61,7 +61,7 @@ def normalize_source(source, autostars=False):
             or not isinstance(endpoint.value, ast.Constant)
             or not isinstance(endpoint.value.value, str)
         ):
-            raise ValueError("В AutoStars отсутствует адрес проверки лицензии")
+            raise ValueError("В плагине отсутствует адрес проверки лицензии")
         # A file downloaded by a buyer contains an embedded endpoint. Normalize it
         # back to a template; delivery always embeds the store's current origin.
         lines = source.splitlines(keepends=True)

@@ -71,7 +71,7 @@ from services.db import (
 from handlers.licenses import router as license_router, deliver, retry_deliveries
 from handlers.marketing import router as marketing_router
 from services.pricing import product_price, price_label, percent
-from services.product_article import article_pages, is_article_product, publication_worker
+from services.product_article import article_pages, is_article_product, publication_worker, GIFT_ARTICLE, GIFT_PREFIX, gift_article_url, add_article_routes
 from services.broadcasts import worker as broadcast_worker
 from services.platega import PlategaClient, PlategaError
 from services.emoji import PackEmojiMiddleware, agreement_emoji_html, AGREEMENT_CACHE_KEY
@@ -487,10 +487,11 @@ def build_product_caption(product, *, max_desc: int = 420, lang: str = "ru") -> 
     if sale:
         price=f"<s>{price}</s> → {product_price(product):.2f}₽ (−{sale:g}%)"
     lines = [f"<b>{name}</b>", f"<blockquote>{desc}</blockquote>"]
-    if product.get("article_url"):
+    article_url = product.get("article_url") or gift_article_url(product.get("id"))
+    if article_url:
         label = {"ru": "📄 Статья", "en": "📄 Article", "uk": "📄 Стаття"}.get(lang, "📄 Статья")
         link_text = {"ru": "жми", "en": "click", "uk": "тисни"}.get(lang, "жми")
-        lines.append(f'{label}: <a href="{html.escape(product["article_url"], quote=True)}">{link_text}</a>')
+        lines.append(f'{label}: <a href="{html.escape(article_url, quote=True)}">{link_text}</a>')
     if product.get("video_url"):
         lines.append(f"🎥 {'Video review' if lang == 'en' else 'Видео-обзор'}: {html.escape(product['video_url'])}")
     lines.append(f"💰 {'Price' if lang == 'en' else 'Цена'}: <b>{price}</b>")
@@ -751,7 +752,7 @@ async def cb_product_article(callback: CallbackQuery):
     if not product or not product.get("active", 1) or not is_article_product(pid):
         await screen_reply(callback, tr(callback.from_user.id, "unavailable"), reply_markup=back_kb("catalog"))
         return
-    pages = article_pages()
+    pages = article_pages(GIFT_ARTICLE) if str(pid) == get_setting(GIFT_PREFIX + "product_id", "") else article_pages()
     if not 0 <= index < len(pages):
         return
     lang = get_user_language(callback.from_user.id)
@@ -2225,6 +2226,7 @@ async def start_callback_server(bot: Bot):
     from services.licenses import add_routes
     add_routes(app)
     add_document_routes(app)
+    add_article_routes(app)
     app["bot"] = bot
     app.router.add_post("/platega/callback", platega_callback_handler)
     app.router.add_get("/platega/callback", payment_health_handler)
@@ -2277,11 +2279,13 @@ async def main():
         await setup_bot_commands(bot)
     except Exception:
         log.exception("commands setup failed")
-    from services.license_setup import setup_autostars
+    from services.license_setup import setup_autostars, setup_autogift
     setup_autostars()
+    setup_autogift()
     setup_documents()
     runner = await start_callback_server(bot)
     article_task = asyncio.create_task(publication_worker(), name="autostars-telegraph")
+    gift_article_task = asyncio.create_task(publication_worker(GIFT_ARTICLE, GIFT_PREFIX), name="autogift-telegraph")
     legal_task = asyncio.create_task(legal_publication_worker(), name="legal-telegraph")
     delivery_task = asyncio.create_task(retry_deliveries(bot), name="license-delivery")
     broadcast_task=asyncio.create_task(broadcast_worker(bot),name="broadcast-worker")
@@ -2299,6 +2303,8 @@ async def main():
     finally:
         legal_task.cancel()
         await asyncio.gather(legal_task, return_exceptions=True)
+        gift_article_task.cancel()
+        await asyncio.gather(gift_article_task, return_exceptions=True)
         article_task.cancel()
         await asyncio.gather(article_task, return_exceptions=True)
         broadcast_task.cancel()
