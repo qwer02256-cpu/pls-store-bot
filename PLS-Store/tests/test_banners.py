@@ -92,7 +92,7 @@ class LocalizedScreenTests(unittest.IsolatedAsyncioTestCase):
                         ("purchases", lambda: main.cb_mypurchases(callback)),
                         ("referral", lambda: main.cb_referral(callback, bot)),
                         ("topup", lambda: main.cb_topup(callback)),
-                        ("payment", lambda: main.show_payment_methods(callback, actor, 1)),
+                        ("topup", lambda: main.show_payment_methods(callback, actor, 1)),
                         ("language", lambda: main.cb_language(callback)),
                         ("faq", lambda: main.cb_faq(callback)),
                         ("documents", lambda: main.cb_documents(callback)),

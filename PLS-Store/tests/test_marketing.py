@@ -102,7 +102,7 @@ class PricingTests(unittest.IsolatedAsyncioTestCase):
                 }
             )
         )
-        message = SimpleNamespace(answer_photo=AsyncMock(), answer=AsyncMock())
+        message = SimpleNamespace(answer=AsyncMock())
         call = SimpleNamespace(
             data=f"purchasepay:2:{self.pid}:" + ("a" * 24),
             message=message,
