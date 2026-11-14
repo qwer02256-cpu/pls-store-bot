@@ -573,8 +573,13 @@ async def upload(message, state: FSMContext, bot):
             or (previous and Path(previous["file_path"]).name == "AutoSMM.py")
             or doc.file_name == "AutoSMM.py"
         )
+        autochannels = (
+            product["name"].replace(" ", "").lower() == "autochannels"
+            or (previous and Path(previous["file_path"]).name == "AutoChannels.py")
+            or doc.file_name == "AutoChannels.py"
+        )
         try:
-            filename = "AutoSMM.py" if autosmm else ("AutoGift.py" if autogift else ("AutoStars.py" if autostars else safe_filename(doc.file_name)))
+            filename = "AutoChannels.py" if autochannels else ("AutoSMM.py" if autosmm else ("AutoGift.py" if autogift else ("AutoStars.py" if autostars else safe_filename(doc.file_name))))
         except ValueError as exc:
             await screen_reply(message, str(exc))
             return
@@ -588,7 +593,7 @@ async def upload(message, state: FSMContext, bot):
         target.parent.mkdir(parents=True, exist_ok=True)
         await bot.download(doc, destination=target)
         try:
-            source = normalize_source(target.read_text(encoding="utf-8-sig"), autostars or autogift or autosmm)
+            source = normalize_source(target.read_text(encoding="utf-8-sig"), autostars or autogift or autosmm or autochannels)
             version = source_version(source)
             target.write_text(source, encoding="utf-8")
         except (ValueError, SyntaxError, UnicodeError):

@@ -128,7 +128,7 @@ async def verify(request):
             or not 0 < int(fid) < 10**18
         ):
             raise ValueError()
-        if payload["product"] not in {"autostars", "autogift", "autosmm"}:
+        if payload["product"] not in {"autostars", "autogift", "autosmm", "autochannels"}:
             raise ValueError()
     except (ValueError, TypeError):
         return web.json_response({"valid": False}, status=400)
@@ -141,7 +141,7 @@ async def verify(request):
         if (
             not row
             or row["status"] != "active"
-            or Path(row["file_path"]).name != {"autostars": "AutoStars.py", "autogift": "AutoGift.py", "autosmm": "AutoSMM.py"}[payload["product"]]
+            or Path(row["file_path"]).name != {"autostars": "AutoStars.py", "autogift": "AutoGift.py", "autosmm": "AutoSMM.py", "autochannels": "AutoChannels.py"}[payload["product"]]
         ):
             return web.json_response(
                 {"valid": False}, status=403, headers={"Cache-Control": "no-store"}

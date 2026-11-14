@@ -20,10 +20,12 @@ GIFT_ARTICLE = json.loads((Path(__file__).resolve().parents[1] / "docs/AUTOGIFT_
 GIFT_PREFIX = "autogift_article_"
 SMM_ARTICLE = json.loads((Path(__file__).resolve().parents[1] / "docs/AUTOSMM_ARTICLE.json").read_text())
 SMM_PREFIX = "autosmm_article_"
+CHANNEL_ARTICLE = json.loads((Path(__file__).resolve().parents[1] / "docs/AUTOCHANNELS_ARTICLE.json").read_text())
+CHANNEL_PREFIX = "autochannels_article_"
 
 
 def is_article_product(product_id):
-    return any(str(product_id) == get_setting(prefix + "product_id", "") for prefix in (SETTING_PREFIX, GIFT_PREFIX, SMM_PREFIX))
+    return any(str(product_id) == get_setting(prefix + "product_id", "") for prefix in (SETTING_PREFIX, GIFT_PREFIX, SMM_PREFIX, CHANNEL_PREFIX))
 
 
 def telegraph_content(article=ARTICLE):
@@ -200,7 +202,7 @@ async def publication_worker(article=ARTICLE, prefix=SETTING_PREFIX):
 def gift_article_url(product_id):
     """Serve bundled copy immediately; a published/admin URL takes precedence."""
     from config import LICENSE_PUBLIC_BASE
-    slug = next((slug for slug, prefix in (('autogift', GIFT_PREFIX), ('autosmm', SMM_PREFIX)) if product_id and str(product_id) == get_setting(prefix + 'product_id', '')), '')
+    slug = next((slug for slug, prefix in (('autogift', GIFT_PREFIX), ('autosmm', SMM_PREFIX), ('autochannels', CHANNEL_PREFIX)) if product_id and str(product_id) == get_setting(prefix + 'product_id', '')), '')
     if not slug:
         return ''
     base = urlsplit(LICENSE_PUBLIC_BASE)
@@ -214,7 +216,7 @@ def add_article_routes(app):
     from aiohttp import web
 
     async def gift_article(request):
-        article = SMM_ARTICLE if request.match_info['product'] == 'autosmm' else GIFT_ARTICLE
+        article = {'autogift': GIFT_ARTICLE, 'autosmm': SMM_ARTICLE, 'autochannels': CHANNEL_ARTICLE}[request.match_info['product']]
         parts = ['<h1>' + html.escape(article['title']) + '</h1>',
                  '<p>' + html.escape(article['intro']) + '</p>']
         for section in article['sections']:
@@ -233,12 +235,12 @@ def add_article_routes(app):
                 '</style></head><body><main>' + ''.join(parts) + '</main></body></html>')
         return web.Response(text=page, content_type='text/html', headers={'X-Content-Type-Options': 'nosniff'})
 
-    app.router.add_get('/articles/{product:autogift|autosmm}', gift_article)
+    app.router.add_get('/articles/{product:autogift|autosmm|autochannels}', gift_article)
 
 
 
 def product_article_pages(product_id):
-    for prefix, article in ((GIFT_PREFIX, GIFT_ARTICLE), (SMM_PREFIX, SMM_ARTICLE)):
+    for prefix, article in ((GIFT_PREFIX, GIFT_ARTICLE), (SMM_PREFIX, SMM_ARTICLE), (CHANNEL_PREFIX, CHANNEL_ARTICLE)):
         if str(product_id) == get_setting(prefix + 'product_id', ''):
             return article_pages(article)
     return article_pages()

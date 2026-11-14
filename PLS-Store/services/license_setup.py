@@ -140,3 +140,25 @@ def setup_autosmm():
         for key, value in ((marker,'applied'), (SMM_PREFIX+'product_id',str(pid)), (SMM_PREFIX+'expected_url',current['article_url'] or '')):
             conn.execute("INSERT OR REPLACE INTO bot_settings(key,value) VALUES(?,?)", (key,value))
         audit(conn, None, 'setup', f'catalog:{pid}:autosmm_23_2_0')
+
+
+def setup_autochannels():
+    """Register the approved gift release once; keep later operator edits."""
+    from services.product_article import CHANNEL_ARTICLE, CHANNEL_PREFIX
+    with db() as conn:
+        rows = conn.execute("SELECT id FROM products WHERE lower(replace(name,' ',''))='autochannels'").fetchall()
+        if len(rows) > 1:
+            raise RuntimeError("Несколько товаров AutoChannels: требуется однозначная привязка файла")
+        marker = 'autochannels_bundle_5_0_0'
+        if conn.execute("SELECT 1 FROM bot_settings WHERE key=?", (marker,)).fetchone():
+            return
+        if rows:
+            pid = rows[0]['id']
+            conn.execute("UPDATE products SET price='399₽ / Навсегда',price_rub=399,active=1,description=?,version='5.0.0' WHERE id=?", (CHANNEL_ARTICLE['short_description'], pid))
+        else:
+            pid = conn.execute("INSERT INTO products(name,price,price_rub,description,version,active) VALUES('AutoChannels','399₽ / Навсегда',399,?,'5.0.0',1)", (CHANNEL_ARTICLE['short_description'],)).lastrowid
+        conn.execute("INSERT INTO license_assets(product_id,file_path,instruction) VALUES(?,?,?) ON CONFLICT(product_id) DO UPDATE SET file_path=excluded.file_path,instruction=excluded.instruction", (pid, 'plugins/AutoChannels.py', (ROOT/'docs/AUTOCHANNELS_INSTALL.txt').read_text()))
+        current = conn.execute("SELECT article_url FROM products WHERE id=?", (pid,)).fetchone()
+        for key, value in ((marker,'applied'), (CHANNEL_PREFIX+'product_id',str(pid)), (CHANNEL_PREFIX+'expected_url',current['article_url'] or '')):
+            conn.execute("INSERT OR REPLACE INTO bot_settings(key,value) VALUES(?,?)", (key,value))
+        audit(conn, None, 'setup', f'catalog:{pid}:autochannels_5_0_0')

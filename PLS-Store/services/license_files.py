@@ -17,7 +17,7 @@ def plugin_bytes(file_path):
         path = ROOT / path
     source = path.read_text(encoding="utf-8")
     ast.parse(source)
-    if path.name in {"AutoStars.py", "AutoGift.py", "AutoSMM.py"}:
+    if path.name in {"AutoStars.py", "AutoGift.py", "AutoSMM.py", "AutoChannels.py"}:
         base = urlsplit(LICENSE_PUBLIC_BASE)
         if (
             base.scheme != "https"
