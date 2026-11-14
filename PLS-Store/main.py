@@ -71,7 +71,7 @@ from services.db import (
 from handlers.licenses import router as license_router, deliver, retry_deliveries
 from handlers.marketing import router as marketing_router
 from services.pricing import product_price, price_label, percent
-from services.product_article import article_pages, is_article_product, publication_worker, GIFT_ARTICLE, GIFT_PREFIX, gift_article_url, add_article_routes
+from services.product_article import article_pages, is_article_product, publication_worker, GIFT_ARTICLE, GIFT_PREFIX, gift_article_url, add_article_routes, SMM_ARTICLE, SMM_PREFIX, product_article_pages
 from services.broadcasts import worker as broadcast_worker
 from services.platega import PlategaClient, PlategaError
 from services.emoji import PackEmojiMiddleware, agreement_emoji_html, AGREEMENT_CACHE_KEY
@@ -752,7 +752,7 @@ async def cb_product_article(callback: CallbackQuery):
     if not product or not product.get("active", 1) or not is_article_product(pid):
         await screen_reply(callback, tr(callback.from_user.id, "unavailable"), reply_markup=back_kb("catalog"))
         return
-    pages = article_pages(GIFT_ARTICLE) if str(pid) == get_setting(GIFT_PREFIX + "product_id", "") else article_pages()
+    pages = product_article_pages(pid)
     if not 0 <= index < len(pages):
         return
     lang = get_user_language(callback.from_user.id)
@@ -2279,13 +2279,15 @@ async def main():
         await setup_bot_commands(bot)
     except Exception:
         log.exception("commands setup failed")
-    from services.license_setup import setup_autostars, setup_autogift
+    from services.license_setup import setup_autostars, setup_autogift, setup_autosmm
     setup_autostars()
     setup_autogift()
+    setup_autosmm()
     setup_documents()
     runner = await start_callback_server(bot)
     article_task = asyncio.create_task(publication_worker(), name="autostars-telegraph")
     gift_article_task = asyncio.create_task(publication_worker(GIFT_ARTICLE, GIFT_PREFIX), name="autogift-telegraph")
+    smm_article_task = asyncio.create_task(publication_worker(SMM_ARTICLE, SMM_PREFIX), name="autosmm-telegraph")
     legal_task = asyncio.create_task(legal_publication_worker(), name="legal-telegraph")
     delivery_task = asyncio.create_task(retry_deliveries(bot), name="license-delivery")
     broadcast_task=asyncio.create_task(broadcast_worker(bot),name="broadcast-worker")
@@ -2303,6 +2305,8 @@ async def main():
     finally:
         legal_task.cancel()
         await asyncio.gather(legal_task, return_exceptions=True)
+        smm_article_task.cancel()
+        await asyncio.gather(smm_article_task, return_exceptions=True)
         gift_article_task.cancel()
         await asyncio.gather(gift_article_task, return_exceptions=True)
         article_task.cancel()

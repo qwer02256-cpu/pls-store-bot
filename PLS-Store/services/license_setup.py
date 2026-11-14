@@ -118,3 +118,25 @@ def setup_autogift():
         for key, value in ((marker,'applied'), (GIFT_PREFIX+'product_id',str(pid)), (GIFT_PREFIX+'expected_url',current['article_url'] or '')):
             conn.execute("INSERT OR REPLACE INTO bot_settings(key,value) VALUES(?,?)", (key,value))
         audit(conn, None, 'setup', f'catalog:{pid}:autogift_6_4_0')
+
+
+def setup_autosmm():
+    """Register the approved gift release once; keep later operator edits."""
+    from services.product_article import SMM_ARTICLE, SMM_PREFIX
+    with db() as conn:
+        rows = conn.execute("SELECT id FROM products WHERE lower(replace(name,' ',''))='autosmm'").fetchall()
+        if len(rows) > 1:
+            raise RuntimeError("Несколько товаров AutoSMM: требуется однозначная привязка файла")
+        marker = 'autosmm_bundle_23_2_0'
+        if conn.execute("SELECT 1 FROM bot_settings WHERE key=?", (marker,)).fetchone():
+            return
+        if rows:
+            pid = rows[0]['id']
+            conn.execute("UPDATE products SET price='349₽ / Навсегда',price_rub=349,active=1,description=?,version='23.2.0' WHERE id=?", (SMM_ARTICLE['short_description'], pid))
+        else:
+            pid = conn.execute("INSERT INTO products(name,price,price_rub,description,version,active) VALUES('AutoSMM','349₽ / Навсегда',349,?,'23.2.0',1)", (SMM_ARTICLE['short_description'],)).lastrowid
+        conn.execute("INSERT INTO license_assets(product_id,file_path,instruction) VALUES(?,?,?) ON CONFLICT(product_id) DO UPDATE SET file_path=excluded.file_path,instruction=excluded.instruction", (pid, 'plugins/AutoSMM.py', (ROOT/'docs/AUTOSMM_INSTALL.txt').read_text()))
+        current = conn.execute("SELECT article_url FROM products WHERE id=?", (pid,)).fetchone()
+        for key, value in ((marker,'applied'), (SMM_PREFIX+'product_id',str(pid)), (SMM_PREFIX+'expected_url',current['article_url'] or '')):
+            conn.execute("INSERT OR REPLACE INTO bot_settings(key,value) VALUES(?,?)", (key,value))
+        audit(conn, None, 'setup', f'catalog:{pid}:autosmm_23_2_0')

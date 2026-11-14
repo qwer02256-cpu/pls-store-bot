@@ -18,10 +18,12 @@ SHORT_DESCRIPTION = ARTICLE["short_description"]
 SETTING_PREFIX = "autostars_article_"
 GIFT_ARTICLE = json.loads((Path(__file__).resolve().parents[1] / "docs/AUTOGIFT_ARTICLE.json").read_text())
 GIFT_PREFIX = "autogift_article_"
+SMM_ARTICLE = json.loads((Path(__file__).resolve().parents[1] / "docs/AUTOSMM_ARTICLE.json").read_text())
+SMM_PREFIX = "autosmm_article_"
 
 
 def is_article_product(product_id):
-    return any(str(product_id) == get_setting(prefix + "product_id", "") for prefix in (SETTING_PREFIX, GIFT_PREFIX))
+    return any(str(product_id) == get_setting(prefix + "product_id", "") for prefix in (SETTING_PREFIX, GIFT_PREFIX, SMM_PREFIX))
 
 
 def telegraph_content(article=ARTICLE):
@@ -198,22 +200,24 @@ async def publication_worker(article=ARTICLE, prefix=SETTING_PREFIX):
 def gift_article_url(product_id):
     """Serve bundled copy immediately; a published/admin URL takes precedence."""
     from config import LICENSE_PUBLIC_BASE
-    if not product_id or str(product_id) != get_setting(GIFT_PREFIX + 'product_id', ''):
+    slug = next((slug for slug, prefix in (('autogift', GIFT_PREFIX), ('autosmm', SMM_PREFIX)) if product_id and str(product_id) == get_setting(prefix + 'product_id', '')), '')
+    if not slug:
         return ''
     base = urlsplit(LICENSE_PUBLIC_BASE)
     if (base.scheme != 'https' or not base.hostname or base.username or base.password
             or base.path not in ('', '/') or base.query or base.fragment):
         return ''
-    return LICENSE_PUBLIC_BASE.rstrip('/') + '/articles/autogift'
+    return LICENSE_PUBLIC_BASE.rstrip('/') + '/articles/' + slug
 
 
 def add_article_routes(app):
     from aiohttp import web
 
     async def gift_article(request):
-        parts = ['<h1>' + html.escape(GIFT_ARTICLE['title']) + '</h1>',
-                 '<p>' + html.escape(GIFT_ARTICLE['intro']) + '</p>']
-        for section in GIFT_ARTICLE['sections']:
+        article = SMM_ARTICLE if request.match_info['product'] == 'autosmm' else GIFT_ARTICLE
+        parts = ['<h1>' + html.escape(article['title']) + '</h1>',
+                 '<p>' + html.escape(article['intro']) + '</p>']
+        for section in article['sections']:
             parts.append('<h2>' + html.escape(section['title']) + '</h2>')
             if section.get('text'):
                 parts.append('<p>' + html.escape(section['text']) + '</p>')
@@ -222,11 +226,19 @@ def add_article_routes(app):
         parts.append('<p><a href="https://t.me/PLSStore1_bot">Открыть PLS Store</a></p>')
         page = ('<!doctype html><html lang="ru"><head><meta charset="utf-8">'
                 '<meta name="viewport" content="width=device-width,initial-scale=1">'
-                '<title>AutoGift · PLS Store</title><style>'
+                '<title>' + html.escape(article['title']) + '</title><style>'
                 'body{margin:0;background:#140d24;color:#f6f1ff;font:18px/1.65 system-ui,sans-serif}'
                 'main{max-width:820px;margin:auto;padding:32px 22px}h1,h2{line-height:1.25}'
                 'h2{margin-top:36px}a{color:#c7a0ff}li{margin:12px 0}'
                 '</style></head><body><main>' + ''.join(parts) + '</main></body></html>')
         return web.Response(text=page, content_type='text/html', headers={'X-Content-Type-Options': 'nosniff'})
 
-    app.router.add_get('/articles/autogift', gift_article)
+    app.router.add_get('/articles/{product:autogift|autosmm}', gift_article)
+
+
+
+def product_article_pages(product_id):
+    for prefix, article in ((GIFT_PREFIX, GIFT_ARTICLE), (SMM_PREFIX, SMM_ARTICLE)):
+        if str(product_id) == get_setting(prefix + 'product_id', ''):
+            return article_pages(article)
+    return article_pages()
