@@ -307,8 +307,8 @@ class ChannelBindingTests(unittest.TestCase):
         account=SimpleNamespace(get_lot_fields=Mock(return_value=fields),save_lot=Mock())
         c=SimpleNamespace(account=account)
         bot=Mock()
-        env=functions('pick_lot_tier',re=re,secrets=secrets,_PlsBotPanel=lambda c:bot,_pending_lot_keyword={10:'1234'},get_tier=lambda tid:{'id':tid},load_lots=lambda:[],save_lots=lambda lots:saved.extend(lots),build_lots_menu=Mock())
-        call=SimpleNamespace(id='call',message=SimpleNamespace(chat=SimpleNamespace(id=10)),data='cad_lot_tier_tier')
+        env=functions('pick_lot_tier',re=re,secrets=secrets,_PlsBotPanel=lambda c:bot,threading=threading,_lot_binding_locks={},log=Mock(),_pending_lot_keyword={10:{'lot_id':'1234','message_id':20}},get_tier=lambda tid:{'id':tid},load_lots=lambda:[],save_lots=lambda lots:saved.extend(lots),build_lots_menu=Mock())
+        call=SimpleNamespace(id='call',message=SimpleNamespace(chat=SimpleNamespace(id=10),message_id=20),data='cad_lot_tier_tier')
         env['pick_lot_tier'](c,call)
         account.save_lot.assert_called_once_with(fields)
         self.assertEqual(saved[0]['lot_id'],'1234');self.assertEqual(saved[0]['tier_id'],'tier')
@@ -321,6 +321,104 @@ class ChannelBindingTests(unittest.TestCase):
         fields=SimpleNamespace(fields={'fields[desc][ru]':'Description'})
         account=SimpleNamespace(get_lot_fields=Mock(side_effect=[fields,SimpleNamespace(fields={'fields[desc][ru]':'unchanged'})]),save_lot=Mock())
         save=Mock();c=SimpleNamespace(account=account)
-        env=functions('pick_lot_tier',re=re,secrets=secrets,_PlsBotPanel=lambda c:Mock(),_pending_lot_keyword={10:'1234'},get_tier=lambda tid:{'id':tid},load_lots=lambda:[],save_lots=save,build_lots_menu=Mock())
-        env['pick_lot_tier'](c,SimpleNamespace(id='call',message=SimpleNamespace(chat=SimpleNamespace(id=10)),data='cad_lot_tier_tier'))
+        env=functions('pick_lot_tier',re=re,secrets=secrets,_PlsBotPanel=lambda c:Mock(),threading=threading,_lot_binding_locks={},log=Mock(),_pending_lot_keyword={10:{'lot_id':'1234','message_id':20}},get_tier=lambda tid:{'id':tid},load_lots=lambda:[],save_lots=save,build_lots_menu=Mock())
+        env['pick_lot_tier'](c,SimpleNamespace(id='call',message=SimpleNamespace(chat=SimpleNamespace(id=10),message_id=20),data='cad_lot_tier_tier'))
         save.assert_not_called()
+
+
+class ChannelBindingRetryTests(unittest.TestCase):
+    def setUp(self):
+        import re
+        import secrets
+        self.bot = Mock()
+        self.fields = SimpleNamespace(fields={'fields[desc][ru]': 'Русское описание',
+                                              'fields[desc][en]': 'English'},
+                                      description_ru='Русское описание', description_en='English')
+        self.remote = dict(self.fields.fields)
+        def save(fields):
+            # FunPayAPI.Account.save_lot calls LotFields.renew_fields().
+            for lang in ('ru', 'en'):
+                fields.fields[f'fields[desc][{lang}]'] = getattr(fields, 'description_' + lang)
+            self.remote.update(fields.fields)
+        def read(lot_id):
+            return SimpleNamespace(fields=dict(self.remote),
+                                   description_ru=self.remote['fields[desc][ru]'],
+                                   description_en=self.remote['fields[desc][en]'])
+        self.account = SimpleNamespace(get_lot_fields=Mock(side_effect=read), save_lot=Mock(side_effect=save))
+        self.card = SimpleNamespace(account=self.account)
+        self.save = Mock()
+        self.env = functions('pick_lot_tier', re=re, secrets=secrets, threading=threading,
+                             _lot_binding_locks={}, log=Mock(), _PlsBotPanel=lambda c:self.bot,
+                             _pending_lot_keyword={10:{'lot_id':'1234','message_id':20}},
+                             get_tier=lambda tid:{'id':tid}, load_lots=lambda:[],
+                             save_lots=self.save, build_lots_menu=Mock())
+        self.call = SimpleNamespace(id='call', message=SimpleNamespace(chat=SimpleNamespace(id=10), message_id=20),
+                                    data='cad_lot_tier_tier')
+
+    def pick(self):
+        self.env['pick_lot_tier'](self.card, self.call)
+
+    def test_marker_survives_funpay_field_renewal_and_preserves_descriptions(self):
+        self.pick()
+        record = self.save.call_args.args[0][0]
+        for lang, original in (('ru', 'Русское описание'), ('en', 'English')):
+            self.assertEqual(self.remote[f'fields[desc][{lang}]'], original + '\n\n#PLSCH:' + record['token'])
+        self.assertNotIn(10, self.env['_pending_lot_keyword'])
+
+    def test_failed_save_can_be_retried_from_same_keyboard(self):
+        real_save = self.account.save_lot.side_effect
+        self.account.save_lot.side_effect = ValueError('private error')
+        self.pick()
+        self.save.assert_not_called()
+        self.assertIn(10, self.env['_pending_lot_keyword'])
+        self.assertNotIn('private error', str(self.bot.mock_calls))
+        self.account.save_lot.side_effect = real_save
+        self.pick()
+        self.save.assert_called_once()
+
+    def test_unconfirmed_marker_keeps_session_and_does_not_bind(self):
+        self.account.save_lot.side_effect = None
+        self.pick()
+        self.save.assert_not_called()
+        self.assertIn(10, self.env['_pending_lot_keyword'])
+        self.assertIn('FunPay не подтвердил', str(self.bot.mock_calls))
+
+    def test_stale_keyboard_cannot_bind_new_lot(self):
+        self.call.message.message_id = 19
+        self.pick()
+        self.account.get_lot_fields.assert_not_called()
+        self.save.assert_not_called()
+        self.assertIn(10, self.env['_pending_lot_keyword'])
+
+    def test_double_click_during_save_does_not_repeat_request(self):
+        save = self.account.save_lot.side_effect
+        def double_click(fields):
+            self.pick()
+            save(fields)
+        self.account.save_lot.side_effect = double_click
+        self.pick()
+        self.account.save_lot.assert_called_once()
+        self.save.assert_called_once()
+        self.assertIn('уже выполняется', str(self.bot.mock_calls))
+
+    def test_completed_keyboard_cannot_bind_again(self):
+        self.pick()
+        self.pick()
+        self.save.assert_called_once()
+        self.account.save_lot.assert_called_once()
+
+    def test_new_session_during_request_is_preserved(self):
+        save = self.account.save_lot.side_effect
+        new_session = {'lot_id':'5678','message_id':21}
+        def new_input(fields):
+            self.env['_pending_lot_keyword'][10] = new_session
+            save(fields)
+        self.account.save_lot.side_effect = new_input
+        self.pick()
+        self.assertIs(self.env['_pending_lot_keyword'][10], new_session)
+
+    def test_local_save_failure_keeps_session_for_retry(self):
+        self.save.side_effect = OSError('disk full')
+        self.pick()
+        self.assertIn(10, self.env['_pending_lot_keyword'])
+        self.assertIn('сохранение привязки на диске', str(self.bot.mock_calls))

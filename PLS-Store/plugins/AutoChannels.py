@@ -1651,49 +1651,85 @@ def _lot_step_keyword(message, c):
     kb = InlineKeyboardMarkup()
     for t in tiers:
         kb.add(InlineKeyboardButton(t["name"], callback_data=f"cad_lot_tier_{t['id']}"))
-    bot.send_message(message.chat.id, "Выберите тариф для этого лота:", reply_markup=kb)
-    # сохраняем ключевое слово на время выбора тарифа
-    _pending_lot_keyword[message.chat.id] = keyword
+    # Publish state before the keyboard can be clicked. Bind it to this keyboard.
+    session = {'lot_id': keyword, 'message_id': None}
+    _pending_lot_keyword[message.chat.id] = session
+    msg = bot.send_message(message.chat.id, "Выберите тариф для этого лота:", reply_markup=kb)
+    session['message_id'] = msg.message_id
 
 
 _pending_lot_keyword = {}
 
 
+_lot_binding_locks = {}
+
+
 def pick_lot_tier(c, call):
     bot = _PlsBotPanel(c)
     chat_id = call.message.chat.id
-    tier_id = call.data.replace("cad_lot_tier_", "")
-    keyword = _pending_lot_keyword.pop(chat_id, None)
     bot.answer_callback_query(call.id)
-    if not keyword:
-        bot.send_message(chat_id, "Сессия добавления лота истекла, начните заново.")
+    lock = _lot_binding_locks.setdefault(chat_id, threading.Lock())
+    if not lock.acquire(blocking=False):
+        bot.send_message(chat_id, "Привязка уже выполняется. Дождитесь результата.")
         return
-    lots = load_lots()
-    if not get_tier(tier_id):
-        bot.send_message(chat_id, 'Тариф удалён, повторите привязку.')
-        return
-    token = secrets.token_hex(16)
-    marker = '#PLSCH:' + token
     try:
-        fields = c.account.get_lot_fields(int(keyword))
-        for lang in ('ru', 'en'):
-            field = 'fields[desc][' + lang + ']'
-            description = fields.fields.get(field, '')
-            if lang == 'ru' or description:
-                description = re.sub(r'#PLSCH:[0-9a-f]{32}', '', description).rstrip()
-                fields.fields[field] = description + '\n\n' + marker
-        c.account.save_lot(fields)
-        verified = c.account.get_lot_fields(int(keyword))
-        if marker not in verified.fields.get('fields[desc][ru]', ''):
-            raise ValueError('FunPay не подтвердил сохранение метки')
-    except Exception as exc:
-        bot.send_message(chat_id, 'Лот не привязан: ' + type(exc).__name__ + '. Проверьте ID и доступ к лоту.')
-        return
-    lots = [lot for lot in lots if not isinstance(lot, dict) or str(lot.get('lot_id')) != keyword]
-    lots.append({'lot_id': keyword, 'tier_id': tier_id, 'token': token})
-    save_lots(lots)
-    bot.send_message(chat_id, "✅ Добавлено.")
-    bot.send_message(chat_id, "Лоты:", reply_markup=build_lots_menu())
+        session = _pending_lot_keyword.get(chat_id)
+        if not session:
+            bot.send_message(chat_id, "Этот выбор тарифа уже завершён или сброшен после перезапуска. Добавьте лот заново.")
+            return
+        if session['message_id'] is not None and session['message_id'] != call.message.message_id:
+            bot.send_message(chat_id, "Это старое меню. Выберите тариф в последнем сообщении добавления лота.")
+            return
+        keyword = session['lot_id']
+        tier_id = call.data.replace("cad_lot_tier_", "", 1)
+        if not get_tier(tier_id):
+            bot.send_message(chat_id, 'Тариф удалён. Добавьте лот заново и выберите существующий тариф.')
+            return
+        token = secrets.token_hex(16)
+        marker = '#PLSCH:' + token
+        stage = 'чтение лота'
+        try:
+            fields = c.account.get_lot_fields(int(keyword))
+            for lang in ('ru', 'en'):
+                field = 'fields[desc][' + lang + ']'
+                description = getattr(fields, 'description_' + lang, fields.fields.get(field, '')) or ''
+                if lang == 'ru' or description:
+                    description = re.sub(r'#PLSCH:[0-9a-f]{32}', '', description).rstrip()
+                    description = description + '\n\n' + marker
+                    setattr(fields, 'description_' + lang, description)
+                    fields.fields[field] = description
+            stage = 'сохранение описания в FunPay'
+            c.account.save_lot(fields)
+            stage = 'проверка сохранённого описания'
+            verified = c.account.get_lot_fields(int(keyword))
+            if marker not in verified.fields.get('fields[desc][ru]', ''):
+                bot.send_message(chat_id, 'FunPay не подтвердил сохранение метки в описании лота. '
+                                 'Привязка не создана. Можно повторно нажать тариф; '
+                                 'если ошибка повторяется, проверьте описание лота в FunPay.')
+                return
+            stage = 'сохранение привязки на диске'
+            lots = load_lots()
+            lots = [lot for lot in lots if not isinstance(lot, dict) or str(lot.get('lot_id')) != keyword]
+            lots.append({'lot_id': keyword, 'tier_id': tier_id, 'token': token})
+            save_lots(lots)
+        except Exception as exc:
+            # Do not expose exception text: API errors can contain authenticated URLs.
+            log('LOT_BIND_FAILED lot_id=' + keyword + ' stage=' + stage + ' error=' + type(exc).__name__)
+            bot.send_message(chat_id, 'Лот не привязан. Этап: ' + stage + '; ошибка: ' + type(exc).__name__ +
+                             '. Выбор сохранён — можно повторно нажать тариф. '
+                             'Если не удаётся прочитать лот, проверьте ID, владельца и вход Cardinal в FunPay.')
+            return
+        # A new ID might have been entered while the network request was running.
+        if _pending_lot_keyword.get(chat_id) is session:
+            _pending_lot_keyword.pop(chat_id, None)
+        try:
+            bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
+        except Exception:
+            pass
+        bot.send_message(chat_id, "✅ Добавлено.")
+        bot.send_message(chat_id, "Лоты:", reply_markup=build_lots_menu())
+    finally:
+        lock.release()
 
 
 def delete_lot(c, call):
