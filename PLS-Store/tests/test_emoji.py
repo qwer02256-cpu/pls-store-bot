@@ -49,6 +49,18 @@ class EmojiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result[3].text, '🇺🇦 Українська')
         self.assertEqual(markup.inline_keyboard[0][0].text, '🎧 Support')
 
+    def test_services_uses_pack_bell_even_with_custom_button_label(self):
+        with patch('services.emoji.get_setting', return_value=json.dumps({'🔔': '777'})):
+            middleware = PackEmojiMiddleware()
+        for label in ('🔔 Услуги ›', 'Услуги'):
+            markup = InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text=label, callback_data='catalog:services'),
+            ]])
+            button = middleware.keyboard(markup).inline_keyboard[0][0]
+            self.assertEqual(button.icon_custom_emoji_id, '777')
+            self.assertNotIn('🔔', button.text)
+            self.assertEqual(button.callback_data, 'catalog:services')
+
     def test_screenshot_icons_and_colored_flag_ids(self):
         icons = ['🔒', '📜', '💵', '🎧', '🗓', '🚀', '☑', '✏', '🇷🇺', '🇺🇦', '🇬🇧']
         ids = {emoji: str(1000 + i) for i, emoji in enumerate(icons)}

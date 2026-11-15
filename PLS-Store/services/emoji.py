@@ -23,7 +23,7 @@ DEFAULT_PACK = "PLSstoreemoje"
 FLAGS_PACK = "PLSStoreFlags"
 # Semantic button icons can differ from the ordinary emoji used in their label.
 BUTTON_EMOJI = {
-    "profile": "👤", "catalog": "🛍", "catalog:plugins": "🧩",
+    "profile": "👤", "catalog": "🛍", "catalog:plugins": "🧩", "catalog:services": "🔔",
     "language": "🌐", "faq": "❓", "support": "🎧", "documents": "📄",
     "topup": "💳", "mypurchases": "🛒", "api_info": "💻",
     "promo": "🎟", "referral": "👥", "home": "🏠",
@@ -177,10 +177,6 @@ class PackEmojiMiddleware(BaseRequestMiddleware):
         for row in markup.inline_keyboard:
             buttons = []
             for button in row:
-                # Services deliberately uses the ordinary bell, independent of pack mappings.
-                if button.callback_data == "catalog:services":
-                    buttons.append(button.model_copy(update={"icon_custom_emoji_id": None}))
-                    continue
                 text = button.text
                 # Back buttons share destination callbacks with forward navigation.
                 is_back = text.startswith(("⬅", "«"))
