@@ -61,6 +61,8 @@ def init_db() -> None:
         # migrations for users / products / orders
         cols = {r[1] for r in conn.execute("PRAGMA table_info(products)")}
         for col, sql in [
+            ("category", "ALTER TABLE products ADD COLUMN category TEXT NOT NULL DEFAULT 'plugins'"),
+            ("fulfillment_message", "ALTER TABLE products ADD COLUMN fulfillment_message TEXT NOT NULL DEFAULT ''"),
             ("image_path", "ALTER TABLE products ADD COLUMN image_path TEXT"),
             ("article_url", "ALTER TABLE products ADD COLUMN article_url TEXT"),
             ("video_url", "ALTER TABLE products ADD COLUMN video_url TEXT"),
@@ -132,6 +134,9 @@ def init_db() -> None:
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        purchase_cols = {r[1] for r in conn.execute("PRAGMA table_info(purchases)")}
+        if "fulfillment_message" not in purchase_cols:
+            conn.execute("ALTER TABLE purchases ADD COLUMN fulfillment_message TEXT NOT NULL DEFAULT ''")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS balance_log (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,

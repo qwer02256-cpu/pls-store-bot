@@ -55,11 +55,17 @@ def record_purchase(conn, user, pid, name, price, balance_debit, payment_id=None
     balance = balance_money(user["balance"]) - debit
     if balance < 0:
         raise ValueError("Недостаточно средств")
+    product = conn.execute("SELECT category,fulfillment_message FROM products WHERE id=?", (pid,)).fetchone()
+    is_service = product is not None and product["category"] == "services"
+    fulfillment = product["fulfillment_message"] if is_service else ""
+    if is_service and not fulfillment.strip():
+        raise ValueError("Услуга ещё не настроена")
     cur = conn.execute(
-        "INSERT INTO purchases(user_id,product_id,price,product_name) VALUES(?,?,?,?)",
-        (user["user_id"], pid, float(price), name),
+        "INSERT INTO purchases(user_id,product_id,price,product_name,fulfillment_message) VALUES(?,?,?,?,?)",
+        (user["user_id"], pid, float(price), name, fulfillment),
     )
-    issue(conn, user["user_id"], pid, cur.lastrowid)
+    if not is_service:
+        issue(conn, user["user_id"], pid, cur.lastrowid)
     conn.execute(
         "UPDATE users SET balance=?,total_spent=total_spent+?,purchases_count=purchases_count+1 WHERE user_id=?",
         (float(balance), float(price), user["user_id"]),
@@ -70,8 +76,8 @@ def record_purchase(conn, user, pid, name, price, balance_debit, payment_id=None
             (user["user_id"], -float(debit), f"Purchase #{cur.lastrowid}", payment_id),
         )
     conn.execute(
-        "INSERT INTO orders(user_id,username,product_id,status) VALUES(?,?,?,'completed')",
-        (user["user_id"], user["username"], pid),
+        "INSERT INTO orders(user_id,username,product_id,status) VALUES(?,?,?,?)",
+        (user["user_id"], user["username"], pid, "new" if is_service else "completed"),
     )
     return dict(
         purpose="purchase",

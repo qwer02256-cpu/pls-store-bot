@@ -47,6 +47,9 @@ def plugin_bytes(file_path):
 
 
 def ready(conn, pid):
+    product = conn.execute("SELECT category,fulfillment_message,active FROM products WHERE id=?", (pid,)).fetchone()
+    if product and product["category"] == "services":
+        return bool(product["active"] and product["fulfillment_message"].strip())
     row = conn.execute(
         "SELECT * FROM license_assets WHERE product_id=?", (pid,)
     ).fetchone()

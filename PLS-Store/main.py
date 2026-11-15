@@ -502,6 +502,9 @@ def build_product_caption(product, *, max_desc: int = 420, lang: str = "ru") -> 
     license_text = get_setting("license_text", "")
     if re.search(r"\w", plain_stored_text(license_text)):
         lines.append(f"📜 {html.escape(license_text)}")
+    if product.get("category") == "services":
+        lines.append(f'📄 <a href="{html.escape(document_url("agreement"), quote=True)}">Пользовательское соглашение</a>')
+        return "\n\n".join(lines)
     license_label = {"ru": "Лицензионное соглашение", "en": "License Agreement", "uk": "Ліцензійна угода"}.get(lang, "Лицензионное соглашение")
     license_link_text = {"ru": "жми", "en": "click", "uk": "тисни"}.get(lang, "жми")
     lines.append(f'{agreement_emoji_html()}{license_label}: <a href="{html.escape(document_url("license"), quote=True)}">{license_link_text}</a>')
@@ -586,8 +589,10 @@ async def render_catalog(target) -> None:
         "en": ("Choose a category.", "Plugins for FunPayCardinal"),
     }
     prompt, category = labels[lang]
+    services_label = {"ru": "Услуги", "uk": "Послуги", "en": "Services"}[lang]
     markup = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=f"🧩 {category} ›", callback_data="catalog:plugins")],
+        [InlineKeyboardButton(text=f"🛎 {services_label} ›", callback_data="catalog:services")],
         [design_button("btn_back", "« Back" if lang == "en" else "« Назад", "home", "danger")],
     ])
     text = f"<b>{tr(user_id, 'shop')}</b>\n━━━━━━━━━━━━━━━━━━━━\n\n{prompt}"
@@ -595,7 +600,7 @@ async def render_catalog(target) -> None:
 
 
 async def render_plugins(target) -> None:
-    products = get_products()
+    products = [p for p in get_products() if p["category"] != "services"]
     if not products:
         text = f"<b>{tr(target.from_user.id, 'plugins_title')}</b>\n\n{tr(target.from_user.id, 'no_products')}"
         markup = InlineKeyboardMarkup(inline_keyboard=[[design_button("btn_back", tr(target.from_user.id, "back"), "catalog", "danger")]])
@@ -611,6 +616,17 @@ async def render_plugins(target) -> None:
 
     photo = banner_path("plugins", get_user_language(target.from_user.id))
     await safe_edit_or_send(target, text, reply_markup=markup, photo=photo)
+
+
+async def render_services(target) -> None:
+    lang = get_user_language(target.from_user.id)
+    title = {"ru": "Услуги", "uk": "Послуги", "en": "Services"}[lang]
+    rows = [[InlineKeyboardButton(text=f"{plain_stored_text(p['name'])} — {price_label(p)}"[:64],
+                                  callback_data=f"product:{p['id']}")]
+            for p in get_products() if p["category"] == "services"]
+    rows.append([design_button("btn_back", tr(target.from_user.id, "back"), "catalog", "danger")])
+    await safe_edit_or_send(target, f"<b>🛎 {title}</b>\n\n{tr(target.from_user.id, 'choose_product')}",
+                            reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
 
 
 # ─── dispatcher ─────────────────────────────────────────────────────────────
@@ -699,6 +715,15 @@ async def cb_plugins(callback: CallbackQuery):
     await render_plugins(callback)
 
 
+@dp.callback_query(F.data == "catalog:services")
+async def cb_services(callback: CallbackQuery):
+    await callback.answer()
+    if not has_accepted_license(callback.from_user.id):
+        await show_license_gate(callback, callback.from_user.id)
+        return
+    await render_services(callback)
+
+
 @dp.callback_query(F.data.startswith("product:"))
 async def cb_product(callback: CallbackQuery):
     await callback.answer()
@@ -722,7 +747,7 @@ async def cb_product(callback: CallbackQuery):
         return
     rows = [
         [InlineKeyboardButton(text=tr(callback.from_user.id, "buy", price=price_rub), callback_data=f"buyproduct:{product_id}:{secrets.token_hex(12)}")],
-        [InlineKeyboardButton(text=tr(callback.from_user.id, "back_catalog"), callback_data="catalog:plugins")],
+        [InlineKeyboardButton(text=tr(callback.from_user.id, "back_catalog"), callback_data="catalog:services" if product.get("category") == "services" else "catalog:plugins")],
         [InlineKeyboardButton(text=tr(callback.from_user.id, "home"), callback_data="home")],
     ]
     keyboard = InlineKeyboardMarkup(inline_keyboard=rows)
@@ -800,6 +825,8 @@ async def begin_product_checkout(message, user, product, bot, token=None):
     if quote["completed"]:
         if quote["result"] is not None:
             await notify_purchase(quote["result"], bot)
+        elif product.get("category") == "services":
+            await screen_reply(message, "Эта услуга уже оплачена. Инструкция и контакт @uservkru — в разделе «Мои покупки».")
         else:
             await screen_reply(message,
                 {
@@ -922,6 +949,7 @@ async def cb_mypurchases(callback: CallbackQuery):
             lines.append(
                 f"• {html.escape(r['product_name'] or 'Товар')} — {r['price']:.0f}₽\n"
                 f"  <i>{r['created_at']}</i>"
+                + (f"\nПокупка №{r['id']}\n" + html.escape(r["fulfillment_message"]) if r["fulfillment_message"] else "")
             )
         text = "\n".join(lines)
     await safe_edit_or_send(callback, text, reply_markup=back_kb("profile"), photo=banner_path("purchases", get_user_language(callback.from_user.id)))
@@ -1226,6 +1254,9 @@ async def notify_purchase(result, bot):
     user_id = result["user_id"]
     amount = result["amount"]
     with db() as conn:
+        purchase = conn.execute("SELECT fulfillment_message FROM purchases WHERE id=? AND user_id=?",
+                                (result["purchase_id"], user_id)).fetchone()
+        fulfillment = purchase["fulfillment_message"] if purchase else ""
         license_row = conn.execute(
             "SELECT id,license_key FROM licenses WHERE purchase_id=?", (result["purchase_id"],)
         ).fetchone()
@@ -1237,12 +1268,14 @@ async def notify_purchase(result, bot):
     try:
         await screen_send(bot,
             user_id,
-            tr(
+            (f"✅ <b>Услуга оплачена!</b>\n\n{safe_stored_html(result['product_name'])}\n"
+             f"Оплачено: <b>{amount:.2f}₽</b>\nПокупка №{result['purchase_id']}\n\n{html.escape(fulfillment)}"
+             if fulfillment else tr(
                 user_id,
                 "purchase_paid",
                 product=safe_stored_html(result["product_name"]),
                 amount=amount,
-            )
+            ))
             + (f"\n\n🔑 <code>{html.escape(license_row['license_key'])}</code>" if license_row else "")
             + "\n\n" + receipt_text(
                 get_user_language(user_id),
@@ -1251,7 +1284,7 @@ async def notify_purchase(result, bot):
                 result["balance"],
             ),
             reply_markup=InlineKeyboardMarkup(
-                inline_keyboard=[
+                inline_keyboard=([[InlineKeyboardButton(text="Написать @uservkru", url="https://t.me/uservkru")]] if fulfillment else [
                     [
                         InlineKeyboardButton(
                             text={
@@ -1261,7 +1294,7 @@ async def notify_purchase(result, bot):
                             }[get_user_language(user_id)],
                             callback_data="licenses",
                         )
-                    ],
+                    ]]) + [
                     [
                         InlineKeyboardButton(
                             text=tr(user_id, "home"), callback_data="home"
@@ -2268,6 +2301,8 @@ async def main():
     log.info("Banner release: pls-purple-2026-11-v4-i18n | available=%s/%s | languages=ru,en,uk",
              available_banners, len(BANNER_KEYS) * 3)
     seed_if_empty()
+    from services.service_catalog import setup_services
+    setup_services()
     bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     emoji_middleware = PackEmojiMiddleware()
     bot.session.middleware(emoji_middleware)
