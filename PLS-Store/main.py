@@ -592,7 +592,7 @@ async def render_catalog(target) -> None:
     services_label = {"ru": "Услуги", "uk": "Послуги", "en": "Services"}[lang]
     markup = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=f"🧩 {category} ›", callback_data="catalog:plugins")],
-        [InlineKeyboardButton(text=f"🛎 {services_label} ›", callback_data="catalog:services")],
+        [InlineKeyboardButton(text=f"🔔 {services_label} ›", callback_data="catalog:services")],
         [design_button("btn_back", "« Back" if lang == "en" else "« Назад", "home", "danger")],
     ])
     text = f"<b>{tr(user_id, 'shop')}</b>\n━━━━━━━━━━━━━━━━━━━━\n\n{prompt}"
@@ -625,7 +625,7 @@ async def render_services(target) -> None:
                                   callback_data=f"product:{p['id']}")]
             for p in get_products() if p["category"] == "services"]
     rows.append([design_button("btn_back", tr(target.from_user.id, "back"), "catalog", "danger")])
-    await safe_edit_or_send(target, f"<b>🛎 {title}</b>\n\n{tr(target.from_user.id, 'choose_product')}",
+    await safe_edit_or_send(target, f"<b>🔔 {title}</b>\n\n{tr(target.from_user.id, 'choose_product')}",
                             reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
 
 
