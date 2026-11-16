@@ -8,6 +8,7 @@ from services.product_article import SHORT_DESCRIPTION
 
 ROOT = Path(__file__).resolve().parents[1]
 _PREVIOUS_BUNDLED_GUIDES = {
+    "0c00769e08daa6afc6fbc2f5ee98279ad09ab67293c209e0a8b06b8e45da6867",
     "4be7155abaf77f97792da1d309b6a7b25c96504ff5435f8ce7d6804c91315acf",
     "71f5edaed4871a62f8ca4b601490ee3859635c8ee03bc29bda3bd5c1b8c8ed2c",
     "16d2dfe305956118ca183823a956f807b7ef283c99db0472ff7664056d95edee",
@@ -34,7 +35,7 @@ def setup_autostars():
             pid = rows[0]["id"]
         else:
             pid = conn.execute(
-                "INSERT INTO products(name,price,price_rub,description,version,active) VALUES('AutoStars','349₽ / Навсегда',349,'Автоматическая продажа Telegram Stars для FunPay Cardinal. Бессрочная лицензия на один аккаунт FunPay.','2.6.1',1)"
+                "INSERT INTO products(name,price,price_rub,description,version,active) VALUES('AutoStars','349₽ / Навсегда',349,'Автоматическая продажа Telegram Stars для FunPay Cardinal. Бессрочная лицензия на один аккаунт FunPay.','2.6.2',1)"
             ).lastrowid
         if not conn.execute(
             "SELECT 1 FROM bot_settings WHERE key='autostars_article_copy_v1'"
@@ -74,14 +75,14 @@ def setup_autostars():
 
         # Apply the built-in release once; later catalog version edits must persist.
         if not conn.execute(
-            "SELECT 1 FROM bot_settings WHERE key='autostars_bundle_version_2_6_1'"
+            "SELECT 1 FROM bot_settings WHERE key='autostars_bundle_version_2_6_2'"
         ).fetchone():
             conn.execute(
-                "UPDATE products SET version='2.6.1' WHERE id=? AND (version IS NULL OR version IN ('','2.1','2.2','2.3','2.4','2.5','2.5.1','2.6.0','2.6.1')) AND EXISTS (SELECT 1 FROM license_assets WHERE product_id=? AND file_path='plugins/AutoStars.py')",
+                "UPDATE products SET version='2.6.2' WHERE id=? AND (version IS NULL OR version IN ('','2.1','2.2','2.3','2.4','2.5','2.5.1','2.6.0','2.6.1','2.6.2')) AND EXISTS (SELECT 1 FROM license_assets WHERE product_id=? AND file_path='plugins/AutoStars.py')",
                 (pid, pid),
             )
             conn.execute(
-                "INSERT INTO bot_settings(key,value) VALUES('autostars_bundle_version_2_6_1','applied')"
+                "INSERT INTO bot_settings(key,value) VALUES('autostars_bundle_version_2_6_2','applied')"
             )
 
         existing = conn.execute(

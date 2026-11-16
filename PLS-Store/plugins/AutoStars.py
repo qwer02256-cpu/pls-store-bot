@@ -332,7 +332,7 @@ def _log(level: str, msg: str):
 # 2. МЕТАДАННЫЕ ПЛАГИНА И КОНСТАНТЫ
 # ========================================================================
 NAME        = "AutoStars"
-VERSION     = "2.6.1"
+VERSION     = "2.6.2"
 DESCRIPTION = "Плагин по продаже звезд."
 CREDITS     = "@uservkru"
 UUID        = "fa0c2f3a-7a85-4c09-a3b2-9f3a9b8f8a75"
@@ -511,15 +511,11 @@ def _money_decimal(value, *, allow_zero=False):
     return number
 
 
-def _total_stars_cost(quote_ton, cfg):
+def _total_stars_cost(quote_ton, cfg=None):
     from decimal import Decimal
-    if not cfg.get('cost_fees_confirmed'):
-        raise ValueError('Комиссии API и сети ещё не указаны')
-    percent = _money_decimal(cfg.get('cost_fee_percent'), allow_zero=True)
-    fixed = _money_decimal(cfg.get('cost_fee_ton'), allow_zero=True)
-    if percent > 100 or fixed > 100:
-        raise ValueError('Некорректные комиссии')
-    return _money_decimal(quote_ton) * (1 + percent / Decimal(100)) + fixed
+    # Fixed Fragment API fee. Legacy configurable fees are intentionally ignored.
+    # TON network costs are excluded at the owner's request.
+    return _money_decimal(quote_ton) * Decimal('1.005')
 
 
 def _target_lot_price(cost_ton, ton_rub, profit_rub):
@@ -620,7 +616,6 @@ def _repricing_cycle(cardinal):
                 ton_price = _money_decimal(saved.get('ton_buy_price'))
                 if not saved.get('ton_price_confirmed'):
                     raise ValueError('Сначала укажите свою цену покупки TON')
-                _total_stars_cost('1', saved)
                 quotes = {}
                 quote_times = {}
                 quote_started = _pls_time.monotonic()
@@ -644,9 +639,7 @@ def _repricing_cycle(cardinal):
                             current = next((it for it in latest['star_lots'] if int(it['lot_id']) == lot_id), None)
                             if (_REPRICE_STOP.is_set() or not latest.get('plugin_enabled', True) or not current
                                     or not current.get('autoprice_enabled') or current != rule
-                                    or latest.get('ton_buy_price') != saved.get('ton_buy_price')
-                                    or any(latest.get(key) != saved.get(key) for key in
-                                           ('cost_fees_confirmed', 'cost_fee_percent', 'cost_fee_ton'))):
+                                    or latest.get('ton_buy_price') != saved.get('ton_buy_price')):
                                 continue
                             if not _is_stars_lot(cardinal, lot_id):
                                 raise ValueError('Лот не относится к Telegram Stars')
@@ -727,7 +720,7 @@ def _autoprice_text(chat_id):
         goal = f'мне {_html.escape(str(profit))} ₽' if profit is not None else 'прибыль не задана'
         state = 'автоцена включена' if lot.get('autoprice_enabled') else 'автоцена выключена'
         lines.append(f'<b>{int(lot["qty"])} звёзд → {goal}</b>\nЛот №{int(lot["lot_id"])} · {state}')
-    lines.append('Цена покупки TON и расходы сервиса общие для всех лотов. Прибыль настраивается отдельно в каждом лоте.')
+    lines.append('Введите вашу цену покупки TON. API 0,5% и вывод FunPay 3% учитываются автоматически. Комиссия сети TON не учитывается. Прибыль задаётся отдельно для каждого лота.')
     return '\n\n'.join(lines)
 
 
@@ -737,7 +730,7 @@ def _autoprice_kb(chat_id):
         goal = str(lot['target_profit_rub']) + ' ₽ мне' if 'target_profit_rub' in lot else 'настроить прибыль'
         kb.add(B(f'{lot["qty"]} звёзд · {goal} · №{lot["lot_id"]}', callback_data=f'{UUID}:aplot:{lot["lot_id"]}'))
     kb.add(B('Добавить лот', callback_data=CBT_STAR_ADD))
-    kb.add(B('Моя цена TON и комиссии', callback_data=f'{UUID}:apfees'))
+    kb.add(B('Моя цена покупки TON', callback_data=f'{UUID}:apfees'))
     kb.add(B('В главное меню', callback_data=CBT_HOME))
     return kb
 
@@ -755,8 +748,8 @@ def _lot_pricing_text(chat_id, lot_id):
         lines.append('<b>Сколько хотите получать себе?</b>\nНажмите «Задать мою прибыль» и отправьте сумму в рублях. Например, 20.')
     else:
         lines.append(f'<b>Хочу получать себе: {_html.escape(str(profit))} ₽ с продажи.</b>')
-    if not cfg.get('ton_price_confirmed') or not cfg.get('cost_fees_confirmed'):
-        lines.append('Осталось указать вашу цену покупки TON и расходы. Кнопка «Настроить по шагам» задаст простые вопросы по одному.')
+    if not cfg.get('ton_price_confirmed'):
+        lines.append('Осталось указать цену покупки 1 TON в рублях. Нажмите «Настроить по шагам».')
     elif profit is not None:
         quote = _pricing_quote(cfg, lot)
         if quote is None:
@@ -770,12 +763,12 @@ def _lot_pricing_text(chat_id, lot_id):
             net = price - withdraw - total
             lines.append('<b>Расчёт за одну продажу:</b>\n'
                          f'Звёзды на Fragment: {_pricing_rub(base)}\n'
-                         f'Расходы сервиса и сети: {_pricing_rub(total - base)}\n'
+                         f'Комиссия Fragment API (0,5%): {_pricing_rub(total - base)}\n'
                          f'Вывод с FunPay (3%): {_pricing_rub(withdraw)}\n'
                          f'<b>Цена вашего лота: {_pricing_rub(price)}</b>\n'
                          f'<b>Вам остаётся: {_pricing_rub(net)}</b>')
             lines.append(f'1 TON куплен за {_html.escape(str(cfg["ton_buy_price"]))} ₽. '
-                         'Расходы учтены по вашим настройкам. Цена округляется вверх до копейки.')
+                         'API 0,5% и вывод FunPay 3% уже учтены. Цена округляется вверх до копейки.')
     lines.append('<b>Автоцена: ' + ('включена' if lot.get('autoprice_enabled') else 'выключена') + '.</b>')
     status = cfg.get('autoprice_status', {}).get(str(lot_id))
     if status:
@@ -783,7 +776,7 @@ def _lot_pricing_text(chat_id, lot_id):
     if cfg.get('autoprice_error'):
         lines.append(_html.escape(cfg['autoprice_error']))
     lines.append('Цена проверяется раз в 5 минут. При ошибке сохраняется старая цена. '
-                 'Изменение курса до покупки или неучтённые расходы могут изменить фактическую прибыль.')
+                 'Комиссия сети TON не учитывается и немного уменьшит фактическую прибыль. Изменение цены звёзд до покупки также может изменить результат.')
     return '\n\n'.join(lines)
 
 
@@ -794,14 +787,14 @@ def _lot_pricing_kb(chat_id, lot_id):
     if lot:
         kb.add(B('Изменить мою прибыль' if 'target_profit_rub' in lot else 'Задать мою прибыль',
                  callback_data=f'{UUID}:apset:{lot_id}'))
-        if not cfg.get('ton_price_confirmed') or not cfg.get('cost_fees_confirmed'):
+        if not cfg.get('ton_price_confirmed'):
             kb.add(B('Настроить по шагам', callback_data=f'{UUID}:apsetup:{lot_id}'))
         else:
             kb.add(B('Посчитать цену продажи', callback_data=f'{UUID}:apcheck:{lot_id}'))
         if lot.get('autoprice_enabled'):
             kb.add(B('Выключить автоцену этого лота', callback_data=f'{UUID}:apon:{lot_id}'))
         elif ('target_profit_rub' in lot and cfg.get('ton_price_confirmed')
-              and cfg.get('cost_fees_confirmed') and _pricing_quote(cfg, lot) is not None):
+              and _pricing_quote(cfg, lot) is not None):
             kb.add(B('Включить автоцену этого лота', callback_data=f'{UUID}:apon:{lot_id}'))
     kb.add(B('К остальным лотам', callback_data=f'{UUID}:ap'))
     return kb
@@ -824,17 +817,6 @@ def _pricing_ask(bot, chat_id, step, lot_id=None):
                 'Введите цену одного TON в рублях. Например: <b>125</b>.\n'
                 'Если потратили 1250 ₽ на 10 TON, введите 125.\n'
                 'Эта настройка используется для всех ваших лотов.')
-    elif step == 'ap_percent':
-        text = ('<b>Комиссия сервиса покупки звёзд</b>\n\n'
-                'Сколько процентов ваш сервис добавляет к стоимости звёзд?\n'
-                'Введите одно число: например, <b>1</b> означает 1%.\n'
-                'Если комиссии нет, введите <b>0</b>. Если не знаете — уточните тариф сервиса; не ставьте 0 наугад.\n'
-                'Комиссию вывода FunPay 3% вводить не нужно — она уже учтена.')
-    else:
-        text = ('<b>Дополнительный расход TON на одну покупку</b>\n\n'
-                'Есть ли фиксированный расход на сеть или сервис сверх цены звёзд?\n'
-                'Введите сумму в TON: например, <b>0,01</b>. Если такого расхода нет — <b>0</b>.\n'
-                'Не включайте сюда процент, указанный на предыдущем шаге.')
     bot.send_message(chat_id, text + '\n\n/cancel — отменить ввод.', parse_mode='HTML', reply_markup=_kb_cancel_fsm())
 
 
@@ -842,8 +824,6 @@ def _pricing_next(cardinal, chat_id, lot_id):
     cfg = _get_cfg(chat_id)
     if not cfg.get('ton_price_confirmed'):
         _pricing_ask(cardinal.telegram.bot, chat_id, 'ap_ton', lot_id)
-    elif not cfg.get('cost_fees_confirmed'):
-        _pricing_ask(cardinal.telegram.bot, chat_id, 'ap_percent', lot_id)
     elif lot_id is not None and 'target_profit_rub' not in (_pricing_lot(cfg, lot_id) or {}):
         _pricing_ask(cardinal.telegram.bot, chat_id, 'ap_profit', lot_id)
     else:
@@ -851,7 +831,7 @@ def _pricing_next(cardinal, chat_id, lot_id):
         if lot_id is not None:
             _pricing_start_preview(cardinal, chat_id, lot_id)
         else:
-            _send_panel(cardinal.telegram.bot, chat_id, 'Цена TON и расходы сохранены для всех лотов.\n\n' + _autoprice_text(chat_id), _autoprice_kb(chat_id))
+            _send_panel(cardinal.telegram.bot, chat_id, 'Цена покупки TON сохранена для всех лотов.\n\n' + _autoprice_text(chat_id), _autoprice_kb(chat_id))
 
 
 def _pricing_preview(cardinal, chat_id, lot_id):
@@ -912,7 +892,7 @@ def _autoprice_callback(cardinal, call):
             cfg = _get_cfg(chat_id)
             lot = _pricing_lot(cfg, lot_id)
             if not lot.get('autoprice_enabled'):
-                if not cfg.get('ton_price_confirmed') or not cfg.get('cost_fees_confirmed') or 'target_profit_rub' not in lot:
+                if not cfg.get('ton_price_confirmed') or 'target_profit_rub' not in lot:
                     _pricing_next(cardinal, chat_id, lot_id)
                     return
                 if _pricing_quote(cfg, lot) is None:
@@ -944,7 +924,7 @@ def _autoprice_receive(cardinal, message):
         return
     try:
         value = _money_decimal(text, allow_zero=step != 'ap_ton')
-        if value > (100 if step in ('ap_percent', 'ap_fixed') else 1_000_000):
+        if value > 1_000_000:
             raise ValueError()
     except Exception:
         cardinal.telegram.bot.send_message(chat_id, 'Отправьте одно число, например 20 или 0,01. '
@@ -964,14 +944,6 @@ def _autoprice_receive(cardinal, message):
         cardinal.telegram.bot.send_message(chat_id, f'Сохранено: за {lot["qty"]} звёзд вы хотите получать себе {value} ₽. Прибыль других лотов не изменена.')
     elif step == 'ap_ton':
         _set_cfg(chat_id, ton_buy_price=float(value), ton_price_confirmed=True)
-        _pricing_ask(cardinal.telegram.bot, chat_id, 'ap_percent', lot_id)
-        return
-    elif step == 'ap_percent':
-        _pricing_ask(cardinal.telegram.bot, chat_id, 'ap_fixed', lot_id)
-        _fsm[chat_id]['fee_percent'] = str(value)
-        return
-    elif step == 'ap_fixed':
-        _set_cfg(chat_id, cost_fee_percent=state['fee_percent'], cost_fee_ton=str(value), cost_fees_confirmed=True)
     else:
         return
     _pricing_next(cardinal, chat_id, lot_id)
@@ -988,8 +960,7 @@ def _record_sale(cardinal: "Cardinal", chat_id: Any, qty: int, order_id: Optiona
     fragment_rate = float(cfg.get("fragment_rate", 0.115))
 
     cost_in_ton = float(cfg.get("autoprice_quote_ton_by_qty", {}).get(str(qty), (qty / 50.0) * fragment_rate))
-    if cfg.get("cost_fees_confirmed"):
-        cost_in_ton = float(_total_stars_cost(cost_in_ton, cfg))
+    cost_in_ton = float(_total_stars_cost(cost_in_ton))
     cost_in_rub = cost_in_ton * ton_buy_price
     revenue = 0.0
 
@@ -1591,9 +1562,9 @@ HELP_TEXT = """
 В главном меню нажмите «Моя прибыль». Выберите, например, 100 звёзд,
 нажмите «Задать мою прибыль» и отправьте 20 — это 20 ₽ себе с продажи.
 Для лота 50 звёзд можно отдельно задать 10 ₽.
-При первой настройке ответьте по одному на вопросы о цене TON и расходах.
+При первой настройке укажите цену покупки 1 TON в рублях.
 Плагин покажет расчёт в рублях; после него включите автоцену выбранного лота.
-Комиссия вывода FunPay 3% учитывается автоматически.
+API 0,5% и вывод FunPay 3% учитываются автоматически. Комиссия сети TON не учитывается.
 
 <b>Сообщения (шаблоны)</b>
 В шаблонах доступны плейсхолдеры:
@@ -1695,7 +1666,7 @@ def _finance_text(chat_id: Any) -> str:
         "⚙️ <b>Текущие параметры для просчёта:</b>\n"
         f"• Вы покупаете 1 TON за: <code>{ton_price} ₽</code>\n"
         f"• Последняя цена 50⭐ на Fragment: <code>{frag_rate} TON</code>\n\n"
-        "<i>* Оценка по последней котировке и настройкам расходов на момент продажи, не по фактическому списанию кошелька. Вывод рассчитан по ставке 3%. Изменения настроек влияют только на будущую себестоимость.</i>"
+        "<i>* Оценка по последней котировке и цене покупки TON на момент продажи. API 0,5% и вывод FunPay 3% учтены; комиссия сети TON не учитывается. Это не выписка кошелька.</i>"
     )
 
 def _presale_text(chat_id: Any) -> str:
@@ -2543,7 +2514,7 @@ def _handle_fsm(message: Message, cardinal: Cardinal):
     text = (message.text or "").strip()
     state = _fsm.get(chat_id) or {}
 
-    if state.get("step") in ("autoprice_profit", "ap_profit", "ap_ton", "ap_percent", "ap_fixed"):
+    if state.get("step") in ("autoprice_profit", "ap_profit", "ap_ton"):
         _autoprice_receive(cardinal, message)
         return
 
@@ -3037,7 +3008,7 @@ def init_cardinal(cardinal: Cardinal):
     except Exception:
         pass
 
-    logger.info(f"Загружен {NAME} v{VERSION} [PLS-LIC-2.6.1]. Продажа требует подтверждённой лицензии.")
+    logger.info(f"Загружен {NAME} v{VERSION} [PLS-LIC-2.6.2]. Продажа требует подтверждённой лицензии.")
     if not _pls_has_key():
         logger.warning("AutoStars: ключ не введён. Откройте /autostars в Telegram-боте Cardinal для активации.")
 
@@ -3058,7 +3029,7 @@ def init_cardinal(cardinal: Cardinal):
         func=lambda m: (m.chat.id in _fsm and _fsm[m.chat.id].get("step") in {
             "pls_license_key","jwt_api_key","jwt_phone","jwt_wallet_ver","jwt_seed",
             "set_min_balance","set_notify_bal","star_add_qty","star_add_lotid",
-            "msg_edit_value","ton_price","frag_rate","presale_text","custom_proxy","autoprice_profit","ap_profit","ap_ton","ap_percent","ap_fixed"
+            "msg_edit_value","ton_price","frag_rate","presale_text","custom_proxy","autoprice_profit","ap_profit","ap_ton"
         })
     )
 

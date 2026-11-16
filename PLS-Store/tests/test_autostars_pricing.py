@@ -36,15 +36,15 @@ class PricingTests(unittest.TestCase):
         self.assertLess((price-Decimal('.01'))*Decimal('.97')-Decimal('28.75'), 20)
         self.assertEqual(load()['_target_lot_price']('.23', '125', '0'), Decimal('29.64'))
 
-    def test_api_and_network_expenses_are_included(self):
+    def test_fixed_api_fee_ignores_legacy_settings_and_excludes_network(self):
         env = load()
         cfg = dict(cost_fees_confirmed=True, cost_fee_percent='1', cost_fee_ton='0.01')
         cost = env['_total_stars_cost']('.23', cfg)
-        self.assertEqual(cost, Decimal('.2423'))
+        self.assertEqual(cost, Decimal('.23115'))
         price = env['_target_lot_price'](cost, '125', '20')
         self.assertGreaterEqual(price * Decimal('.97') - cost * 125, 20)
-        with self.assertRaises(ValueError):
-            env['_total_stars_cost']('.23', {})
+        self.assertEqual(env['_total_stars_cost']('.23', {}), cost)
+        self.assertEqual(env['_total_stars_cost']('.23'), cost)
 
     def test_bad_inputs_cannot_produce_prices(self):
         for bad in ('NaN', 'Infinity', '-1', '0', '', True):
@@ -101,11 +101,11 @@ class RepricingTests(unittest.TestCase):
 
     def test_price_save_verified_and_other_fields_preserved(self):
         self.run_cycle()
-        self.assertEqual(vars(self.fields),dict(price=50.26,active=False,title_ru='Title',description_ru='Description',amount=7))
+        self.assertEqual(vars(self.fields),dict(price=50.41,active=False,title_ru='Title',description_ru='Description',amount=7))
         self.account.save_lot.assert_called_once_with(self.fields)
         self.assertEqual(self.account.get_lot_fields.call_count,2)
         self.assertEqual({c.args[1] for c in self.quotes.call_args_list},{50,100})
-        self.assertIn('50.26',self.settings['10']['autoprice_status']['123'])
+        self.assertIn('50.41',self.settings['10']['autoprice_status']['123'])
         self.account.save_lot.reset_mock()
         self.run_cycle()
         self.account.save_lot.assert_not_called()
@@ -116,8 +116,8 @@ class RepricingTests(unittest.TestCase):
         fields = {123: self.fields, 456: SimpleNamespace(price=30.0, active=True)}
         self.account.get_lot_fields.side_effect = lambda lot_id: fields[lot_id]
         self.run_cycle()
-        self.assertEqual(fields[123].price, 50.26)
-        self.assertEqual(fields[456].price, 25.13)
+        self.assertEqual(fields[123].price, 50.41)
+        self.assertEqual(fields[456].price, 25.21)
         self.assertEqual(self.account.save_lot.call_count, 2)
 
     def test_failed_quote_cannot_use_old_rate_or_touch_funpay(self):
@@ -158,14 +158,15 @@ class RepricingTests(unittest.TestCase):
         self.run_cycle()
         self.account.save_lot.assert_not_called()
 
-    def test_unknown_expenses_or_stale_quote_block_updates(self):
-        self.settings['10']['cost_fees_confirmed'] = False
-        self.run_cycle()
-        self.quotes.assert_not_called()
-        self.settings['10']['cost_fees_confirmed'] = True
+    def test_stale_quote_blocks_updates_even_without_fee_settings(self):
+        for key in ('cost_fees_confirmed', 'cost_fee_percent', 'cost_fee_ton'):
+            self.settings['10'].pop(key)
         self.env['_pls_time'].monotonic = Mock(side_effect=[0, 121])
         self.run_cycle()
         self.account.save_lot.assert_not_called()
+        self.env['_pls_time'].monotonic = lambda: 1000
+        self.run_cycle()
+        self.account.save_lot.assert_called_once()
 
     def test_save_failure_is_reported(self):
         self.account.save_lot.side_effect=RuntimeError('save failed')
@@ -201,14 +202,8 @@ class PricingInputTests(unittest.TestCase):
         self.assertEqual(self.cfg['star_lots'][0]['target_profit_rub'], '20')
         self.assertEqual(self.env['_fsm'][10]['step'], 'ap_ton')
         self.send('125')
-        self.assertEqual(self.env['_fsm'][10]['step'], 'ap_percent')
-        self.assertIn('3%', self.bot.send_message.call_args.args[1])
-        self.send('1')
-        self.assertEqual(self.env['_fsm'][10]['step'], 'ap_fixed')
-        self.send('0,01')
-        self.assertEqual(self.cfg['cost_fee_percent'], '1')
-        self.assertEqual(self.cfg['cost_fee_ton'], '0.01')
-        self.assertTrue(self.cfg['cost_fees_confirmed'])
+        self.assertNotIn(10, self.env['_fsm'])
+        self.assertNotIn('cost_fee_percent', self.cfg)
         self.env['_pricing_start_preview'].assert_called_once_with(self.card, 10, 123)
         self.assertFalse(self.cfg['star_lots'][0].get('autoprice_enabled', False))
         self.choose_profit(456)
@@ -276,15 +271,15 @@ class PricingScreensTests(unittest.TestCase):
         fifty = self.env['_lot_pricing_text'](10, 456)
         self.assertIn('100 звёзд', hundred)
         self.assertIn('20 ₽ с продажи', hundred)
-        self.assertIn('50,26 ₽', hundred)
+        self.assertIn('50,41 ₽', hundred)
         self.assertIn('Вам остаётся: 20,00 ₽', hundred)
         self.assertIn('50 звёзд', fifty)
         self.assertIn('10 ₽ с продажи', fifty)
-        self.assertIn('25,13 ₽', fifty)
-        self.assertIn('Вам остаётся: 10,00 ₽', fifty)
+        self.assertIn('25,21 ₽', fifty)
+        self.assertIn('Вам остаётся: 10,01 ₽', fifty)
         for screen in (hundred, fifty):
             self.assertIn('Вывод с FunPay (3%)', screen)
-            self.assertIn('Расходы сервиса и сети', screen)
+            self.assertIn('Комиссия Fragment API (0,5%)', screen)
 
     def test_visible_entry_in_home_finances_lots_and_plain_buttons(self):
         for name in ('_home_kb', '_finance_kb', '_stars_kb'):
