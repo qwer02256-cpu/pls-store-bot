@@ -81,6 +81,7 @@ class ActivationTests(unittest.TestCase):
             NAME="AutoStars",
             UUID="uuid",
             logger=Mock(),
+            _start_repricing=Mock(),
             _get_cfg=Mock(return_value={"plugin_enabled": False}),
             _set_cfg=Mock(),
             _open_settings=Mock(),

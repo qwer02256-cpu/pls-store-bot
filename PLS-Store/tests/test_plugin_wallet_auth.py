@@ -1,4 +1,5 @@
 """Regression: original 24-word auth and safe removal of the former provider."""
+import threading
 import ast
 import json
 import re
@@ -18,7 +19,7 @@ class WalletAuthTests(unittest.TestCase):
         future = ast.ImportFrom(module='__future__', names=[ast.alias(name='annotations')], level=0)
         self.settings = {}
         self.bot = Mock()
-        self.env = dict(json=json, logger=Mock(), K=Mock(), B=Mock(), CBT_JWT_CONFIRMED="confirmed", CBT_JWT_RESEND="retry", CBT_FSM_CANCEL="cancel", _load_settings=lambda: self.settings,
+        self.env = dict(_SETTINGS_LOCK=threading.RLock(), json=json, logger=Mock(), K=Mock(), B=Mock(), CBT_JWT_CONFIRMED="confirmed", CBT_JWT_RESEND="retry", CBT_FSM_CANCEL="cancel", _load_settings=lambda: self.settings,
                         _save_settings=Mock(), _default_templates=lambda: {},
                         STARS_CATEGORY_ID=2418, MIN_BALANCE_TON=5,
                         _fsm={10: {'step': 'jwt_seed', 'api_key': 'dummy', 'phone': '123', 'wallet_version': 'V4R2'}},
