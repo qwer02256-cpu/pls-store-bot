@@ -155,6 +155,15 @@ class AIChatTests(unittest.TestCase):
         self.p._process_one(self.card)
         self.assertNotIn('OTHER BUYER', json.dumps(self.p._request.call_args.args[2]))
 
+    def test_provider_reference_is_replaced_before_actual_funpay_post(self):
+        self.enqueue()
+        self.p._request.return_value = {'choices': [{'message': {'content': 'Ответ сгенерирован через OpenAI, пишите @seller'}}]}
+        self.p._process_one(self.card)
+        reply = self.card.send_message.call_args.args[1]
+        self.assertNotIn('OpenAI', reply)
+        self.assertNotIn('@seller', reply)
+        self.assertIn('дождитесь', reply)
+
     def test_provider_error_and_invalid_response_do_not_post_or_expose_error_body(self):
         self.enqueue()
         self.p._request.side_effect = RuntimeError('synthetic secret in HTTP error')
@@ -219,3 +228,100 @@ class APITransportTests(unittest.TestCase):
             self.assertEqual((p.ROOT/'api_key.txt').stat().st_mode & 0o777, 0o600)
             os.environ['PLS_AI_API_KEY'] = 'synthetic-environment-key'
             self.assertEqual(p._key(), 'synthetic-environment-key')
+
+
+class CatalogAndPolicyTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.p = load()
+        self.p.ROOT = Path(self.tmp.name)
+        self.p._init_db()
+        sub = SimpleNamespace(type=SimpleNamespace(name='COMMON'), name='Telegram')
+        self.lots = [SimpleNamespace(id=100, description='100 Telegram Stars', price=150.0, subcategory=sub, html='150 ₽'),
+                     SimpleNamespace(id=200, description='Подписчики Telegram', price=20.0, subcategory=sub, html='20 ₽')]
+        self.profile = SimpleNamespace(id=10, get_lots=lambda: self.lots)
+        self.fields = SimpleNamespace(title_ru='100 Telegram Stars', description_ru='Выдача по правилам лота.',
+                                      description_en='', active=True, fields={'delivery': 'NEVER_SHARE_PRIVATE_DELIVERY'})
+        self.card = SimpleNamespace(account=SimpleNamespace(id=10, get_user=Mock(return_value=self.profile),
+                                    get_lot_fields=Mock(return_value=self.fields)))
+
+    def test_own_catalog_and_relevant_description_without_private_delivery_fields(self):
+        context = self.p._catalog_context(self.card, 'Сколько стоят 100 звёзд?')
+        self.card.account.get_user.assert_called_once_with(10)
+        self.assertTrue(context['fresh'])
+        self.assertEqual(context['items'][0]['id'], '100')
+        self.assertEqual(context['items'][0]['price'], '150.0')
+        self.assertEqual(context['items'][0]['currency'], 'RUB')
+        self.assertIn('description', context['items'][0])
+        self.assertNotIn('NEVER_SHARE_PRIVATE_DELIVERY', json.dumps(context))
+        self.assertEqual(context['items'][0]['url'], 'https://funpay.com/lots/offer?id=100')
+
+    def test_profile_and_descriptions_are_cached_without_refetch_for_each_question(self):
+        self.p._catalog_context(self.card, '100 stars')
+        self.p._catalog_context(self.card, '100 stars')
+        self.card.account.get_user.assert_called_once()
+        self.card.account.get_lot_fields.assert_called_once()
+
+    def test_stale_catalog_never_claims_current_price_when_refresh_fails(self):
+        self.p._refresh_catalog(self.card)
+        with self.p._db() as conn:
+            conn.execute('UPDATE catalog SET checked=0')
+        self.card.account.get_user.side_effect = RuntimeError('No connection')
+        context = self.p._catalog_context(self.card, '100 stars')
+        self.assertFalse(context['fresh'])
+        self.assertTrue(all(item['price'] is None for item in context['items']))
+        self.assertTrue(all('description' not in item for item in context['items']))
+
+    def test_removed_products_disappear_after_refresh(self):
+        self.p._refresh_catalog(self.card)
+        self.lots = self.lots[:1]
+        catalog, fresh = self.p._refresh_catalog(self.card, force=True)
+        self.assertTrue(fresh)
+        self.assertEqual([item['id'] for item in catalog['items']], ['100'])
+
+    def test_other_seller_profile_cannot_be_used(self):
+        self.profile.id = 99
+        catalog, fresh = self.p._refresh_catalog(self.card)
+        self.assertFalse(fresh)
+        self.assertEqual(catalog['items'], [])
+
+    def test_currency_offers_do_not_use_common_lot_edit_endpoint(self):
+        self.lots[0].subcategory = SimpleNamespace(type=SimpleNamespace(name='CURRENCY'), name='Currency')
+        context = self.p._catalog_context(self.card, '100 stars')
+        self.assertEqual(context['items'][0]['url'], 'https://funpay.com/chips/offer?id=100')
+        self.assertNotIn('description', context['items'][0])
+        self.card.account.get_lot_fields.assert_not_called()
+
+    def test_inactive_lot_is_marked_and_unknown_currency_is_not_invented(self):
+        self.fields.active = False
+        self.lots[0].html = ''
+        item = self.p._catalog_context(self.card, '100 stars')['items'][0]
+        self.assertFalse(item['active'])
+        self.assertEqual(item['currency'], '')
+
+    def test_policy_filter_blocks_provider_names_external_contacts_and_links(self):
+        allowed = {'https://funpay.com/lots/offer?id=100'}
+        for text in ('Я работаю через OpenAI', 'Мой сервис tyler-tokens.life', 'Заказ через Fragment API',
+                     'Пишите @seller', 'Оплата https://example.com', 'Напишите t.me/seller',
+                     'Платите на funpay.com.evil.com', 'Откройте https://funpay.com@evil.com/path'):
+            with self.subTest(text=text):
+                result = self.p._customer_reply(text, allowed)
+                self.assertIn('дождитесь', result)
+        for text in ('Есть 100 Telegram Stars.', 'Оплата только на FunPay.', 'Оплатите на funpay.com',
+                     'Товар: https://funpay.com/lots/offer?id=100'):
+            self.assertEqual(self.p._customer_reply(text, allowed), text)
+        self.assertIn('дождитесь', self.p._customer_reply('https://funpay.com/lots/offer?id=999', allowed))
+
+    def test_public_text_removes_credentials_provider_names_and_external_links(self):
+        text = self.p._public_text('Товар <b>stars</b> sk-synthetic-private https://example.com @seller OpenAI')
+        self.assertNotIn('sk-synthetic-private', text)
+        self.assertNotIn('https://example.com', text)
+        self.assertNotIn('OpenAI', text)
+        self.assertNotIn('@seller', text)
+
+    def test_prompt_asks_for_direct_answers_and_keeps_transaction_on_funpay(self):
+        prompt = self.p.DEFAULT_INSTRUCTIONS
+        for phrase in ('1–4 короткими', 'Не спрашивай повторно', 'ОДИН нужный вопрос',
+                       'только на FunPay', 'до полного получения', 'провайдера или модели'):
+            self.assertIn(phrase, prompt)
