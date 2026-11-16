@@ -236,7 +236,7 @@ class SMMPanelBoundaryTests(unittest.TestCase):
         env['_start_order_locked'](object(),'42',False)
         env['_notify_admins'].assert_called_once()
 
-    def test_original_callback_namespace_and_button_styles(self):
+    def test_original_callback_namespace_and_plain_buttons(self):
         from typing import Any
         class LegacyButton:
             def __init__(self,text,**kwargs):self.data=dict(text=text,**kwargs)
@@ -244,9 +244,9 @@ class SMMPanelBoundaryTests(unittest.TestCase):
         nodes=[n for n in TREE.body if isinstance(n,(ast.FunctionDef,ast.ClassDef)) and n.name in {'_PlsButton','_pls_button','InlineKeyboardButton','B','U','_pls_panel'}]
         env=dict(Any=Any,_TelegramButton=LegacyButton,logger=Mock())
         exec(compile(ast.Module(body=nodes,type_ignores=[]),'<smm ui>','exec'),env)
-        for text,style in [('Настройки','primary'),('Создать','success'),('Назад','danger')]:
+        for text in ['Настройки', 'Создать', 'Назад']:
             data=env['B'](text,'home').to_dict()
-            self.assertEqual(data['callback_data'],'autosmm:home');self.assertEqual(data['style'],style)
+            self.assertEqual(data['callback_data'],'autosmm:home');self.assertNotIn('style', data)
         self.assertIn('PLS Store · AutoSMM',env['_pls_panel']('Меню'))
 
 

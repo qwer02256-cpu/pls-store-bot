@@ -26,28 +26,8 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton as _Telegra
 import secrets
 import html
 
-# PLS Store UI: shared blue/green actions and red navigation.
-# Serialize Bot API style ourselves to support older Cardinal pyTelegramBotAPI.
-class _PlsButton(_TelegramButton):
-    def to_dict(self):
-        data = super().to_dict()
-        data["style"] = self._pls_style
-        return data
-
-
 def InlineKeyboardButton(text, *args, **kwargs):
-    style = kwargs.pop("style", None)
-    label = text.lower()
-    if style is None:
-        if any(word in label for word in ("назад", "домой", "главное меню", "отмена", "удалить", "выключить", "отключить")) or text == "🗑":
-            style = "danger"
-        elif any(word in label for word in ("включить", "добавить", "создать", "подтверд", "сохранить", "отправить")):
-            style = "success"
-        else:
-            style = "primary"
-    button = _PlsButton(text, *args, **kwargs)
-    button._pls_style = style
-    return button
+    return _TelegramButton(text, *args, **kwargs)
 
 
 def _pls_panel(text):

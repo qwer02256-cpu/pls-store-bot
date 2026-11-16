@@ -225,7 +225,7 @@ class GiftArticleRouteTests(unittest.IsolatedAsyncioTestCase):
 
 
 class GiftPanelTests(unittest.TestCase):
-    def test_button_colors_and_branding_preserve_callbacks(self):
+    def test_plain_buttons_and_branding_preserve_callbacks(self):
         class LegacyButton:
             def __init__(self,text,**kwargs):self.data=dict(text=text,**kwargs)
             def to_dict(self):return self.data.copy()
@@ -233,9 +233,9 @@ class GiftPanelTests(unittest.TestCase):
         nodes=[n for n in TREE.body if isinstance(n,(ast.ClassDef,ast.FunctionDef)) and n.name in names]
         env={'_TelegramButton':LegacyButton}
         exec(compile(ast.Module(body=nodes,type_ignores=[]),'<gift ui>','exec'),env)
-        for label,color in [('Настройки','primary'),('Добавить лот','success'),('Выключить','danger'),('Главное меню','danger')]:
+        for label in ['Настройки', 'Добавить лот', 'Выключить', 'Главное меню']:
             data=env['InlineKeyboardButton'](label,callback_data='ag:unchanged').to_dict()
-            self.assertEqual(data['style'],color);self.assertEqual(data['callback_data'],'ag:unchanged')
+            self.assertNotIn('style', data);self.assertEqual(data['callback_data'],'ag:unchanged')
         text=env['_pls_panel']('Настройки')
         self.assertTrue(text.startswith('<b>PLS Store · AutoGift</b>'))
         self.assertEqual(env['_pls_panel'](text),text)

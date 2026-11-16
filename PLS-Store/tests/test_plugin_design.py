@@ -35,8 +35,8 @@ class DesignTests(unittest.TestCase):
                     self.assertEqual(button.text, label)
                     self.assertEqual(button.style, "primary")
 
-    def test_plugin_serializes_styles_with_legacy_button_constructor(self):
-        # Legacy Cardinal versions have no style parameter; preserve URL/callback.
+    def test_plugins_use_plain_buttons_and_keep_store_branding(self):
+        # Legacy Cardinal constructors accept callbacks and URLs, but no style.
         class LegacyButton:
             def __init__(self, text, callback_data=None, url=None):
                 self.data = dict(text=text, callback_data=callback_data, url=url)
@@ -44,37 +44,29 @@ class DesignTests(unittest.TestCase):
             def to_dict(self):
                 return {k: v for k, v in self.data.items() if v is not None}
 
-        tree = ast.parse(
-            (Path(__file__).resolve().parents[1] / "plugins/AutoStars.py").read_text()
-        )
-        names = {"_PlsButton", "B", "_pls_panel", "_about_text"}
-        nodes = [
-            n
-            for n in tree.body
-            if isinstance(n, (ast.ClassDef, ast.FunctionDef)) and n.name in names
-        ]
-        env = {
-            "_TelegramButton": LegacyButton,
-            "VERSION": "2.1",
-            "CREDITS": "@author",
-            "_PLS_MODE": "online",
-        }
-        exec(compile(ast.Module(body=nodes, type_ignores=[]), "<ui>", "exec"), env)
-        for text, style in [
-            ("⚙️ Настройки", "primary"),
-            ("➕ Добавить лот", "success"),
-            ("◀️ Назад", "danger"),
-            ("🗑", "danger"),
+        for plugin, helper in [
+            ("AutoStars", "B"),
+            ("AutoGift", "InlineKeyboardButton"),
+            ("AutoChannels", "InlineKeyboardButton"),
+            ("AutoSMM", "_pls_button"),
         ]:
-            data = env["B"](text, callback_data="same-callback").to_dict()
-            self.assertEqual(data["style"], style)
-            self.assertEqual(data["callback_data"], "same-callback")
-        self.assertEqual(
-            env["B"]("Магазин", url="https://example.com", style="success").to_dict()[
-                "url"
-            ],
-            "https://example.com",
-        )
-        panel = env["_about_text"]()
-        self.assertTrue(panel.startswith("<b>PLS Store · AutoStars</b>"))
-        self.assertEqual(env["_pls_panel"](panel), panel)
+            with self.subTest(plugin=plugin):
+                tree = ast.parse(
+                    (Path(__file__).resolve().parents[1] / "plugins" / f"{plugin}.py").read_text()
+                )
+                nodes = [n for n in tree.body if isinstance(n, ast.FunctionDef)
+                         and n.name in {helper, "_pls_panel"}]
+                env = {"_TelegramButton": LegacyButton}
+                exec(compile(ast.Module(body=nodes, type_ignores=[]), "<ui>", "exec"), env)
+                for text in ["⚙️ Настройки", "➕ Добавить лот", "◀️ Назад", "🗑"]:
+                    self.assertEqual(
+                        env[helper](text, callback_data="same-callback").to_dict(),
+                        {"text": text, "callback_data": "same-callback"},
+                    )
+                self.assertEqual(
+                    env[helper]("PLS Store", url="https://t.me/PLSStore1_bot").to_dict(),
+                    {"text": "PLS Store", "url": "https://t.me/PLSStore1_bot"},
+                )
+                panel = env["_pls_panel"]("Настройки")
+                self.assertTrue(panel.startswith(f"<b>PLS Store · {plugin}</b>"))
+                self.assertEqual(env["_pls_panel"](panel), panel)

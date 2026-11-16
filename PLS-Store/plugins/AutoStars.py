@@ -31,28 +31,8 @@ if TYPE_CHECKING:
     from cardinal import Cardinal
 
 
-# PLS Store UI: shared blue/green actions and red navigation.
-# Serialize Bot API style ourselves to support older Cardinal pyTelegramBotAPI.
-class _PlsButton(_TelegramButton):
-    def to_dict(self):
-        data = super().to_dict()
-        data["style"] = self._pls_style
-        return data
-
-
 def B(text, *args, **kwargs):
-    style = kwargs.pop("style", None)
-    label = text.lower()
-    if style is None:
-        if any(word in label for word in ("назад", "домой", "отмена", "удалить", "выключить")) or text == "🗑":
-            style = "danger"
-        elif any(word in label for word in ("включить", "добавить", "создать", "подтверд", "сохранить", "отправить")):
-            style = "success"
-        else:
-            style = "primary"
-    button = _PlsButton(text, *args, **kwargs)
-    button._pls_style = style
-    return button
+    return _TelegramButton(text, *args, **kwargs)
 
 
 def _pls_panel(text):
@@ -927,10 +907,10 @@ def _pls_has_key():
 def _pls_license_kb():
     kb = K()
     kb.row(
-        B("🔑 Ввести ключ", callback_data=CBT_LICENSE_ENTER, style="success"),
-        B("🔄 Проверить", callback_data=CBT_LICENSE_CHECK, style="primary"),
+        B("🔑 Ввести ключ", callback_data=CBT_LICENSE_ENTER),
+        B("🔄 Проверить", callback_data=CBT_LICENSE_CHECK),
     )
-    kb.add(B("« Назад к плагинам", callback_data=CBT_BACK_PLUGINS, style="danger"))
+    kb.add(B("« Назад к плагинам", callback_data=CBT_BACK_PLUGINS))
     return kb
 
 
@@ -1245,13 +1225,13 @@ def _proxy_text(chat_id: Any) -> str:
 # Кнопки Telegram
 def _home_kb() -> InlineKeyboardMarkup:
     kb = K()
-    kb.row(B("⚙️ Настройки", callback_data=CBT_SETTINGS, style="primary"),
-           B("⭐ Лоты", callback_data=CBT_STARS, style="success"))
-    kb.row(B("💬 Сообщения", callback_data=CBT_MESSAGES, style="primary"),
-           B("📊 Финансы", callback_data=CBT_FINANCE, style="success"))
-    kb.row(B("🔑 Лицензия", callback_data=CBT_LICENSE, style="primary"),
-           B("📖 Инструкция", callback_data=CBT_HELP, style="primary"))
-    kb.add(B("« Назад к плагинам", callback_data=CBT_BACK_PLUGINS, style="danger"))
+    kb.row(B("⚙️ Настройки", callback_data=CBT_SETTINGS),
+           B("⭐ Лоты", callback_data=CBT_STARS))
+    kb.row(B("💬 Сообщения", callback_data=CBT_MESSAGES),
+           B("📊 Финансы", callback_data=CBT_FINANCE))
+    kb.row(B("🔑 Лицензия", callback_data=CBT_LICENSE),
+           B("📖 Инструкция", callback_data=CBT_HELP))
+    kb.add(B("« Назад к плагинам", callback_data=CBT_BACK_PLUGINS))
     return kb
 
 def _help_kb() -> InlineKeyboardMarkup:
