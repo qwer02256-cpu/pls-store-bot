@@ -155,6 +155,26 @@ class AIChatTests(unittest.TestCase):
         self.p._process_one(self.card)
         self.assertNotIn('OTHER BUYER', json.dumps(self.p._request.call_args.args[2]))
 
+    def test_simple_greeting_uses_zero_paid_api_calls(self):
+        self.enqueue(self.event('Привет!'))
+        self.p._process_one(self.card)
+        self.p._request.assert_not_called()
+        self.card.send_message.assert_called_once()
+        with self.p._db() as conn:
+            row = conn.execute('SELECT usage,outcome FROM api_usage').fetchone()
+        self.assertEqual(row['outcome'], 'local')
+        self.assertEqual(json.loads(row['usage'])['total_tokens'], 0)
+
+    def test_long_useful_answer_is_not_cut_to_old_character_limit(self):
+        self.enqueue()
+        reply = 'Подробное объяснение установки и настройки. ' * 60
+        self.p._request.return_value = {'choices': [{'message': {'content': reply}}],
+                                       'usage': {'prompt_tokens': 100, 'completion_tokens': 600, 'total_tokens': 700}}
+        self.p._process_one(self.card)
+        self.assertEqual(self.card.send_message.call_args.args[1], reply.strip())
+        self.assertEqual(self.p._request.call_count, 1)
+        self.assertEqual(self.p._request.call_args.args[2]['max_tokens'], 800)
+
     def test_provider_reference_is_replaced_before_actual_funpay_post(self):
         self.enqueue()
         self.p._request.return_value = {'choices': [{'message': {'content': 'Ответ сгенерирован через OpenAI, пишите @seller'}}]}
@@ -181,7 +201,7 @@ class AIChatTests(unittest.TestCase):
         self.assertFalse(self.p._process_one(self.card))
         self.card.send_message.assert_called_once()
 
-    def test_restart_during_send_is_uncertain_and_during_generation_is_recoverable(self):
+    def test_restart_does_not_repeat_potentially_charged_generation_or_send(self):
         self.enqueue()
         with self.p._db() as conn:
             conn.execute("UPDATE jobs SET state='sending'")
@@ -190,7 +210,7 @@ class AIChatTests(unittest.TestCase):
         with self.p._db() as conn:
             conn.execute("UPDATE jobs SET state='generating'")
         self.p._init_db()
-        self.assertEqual(self.states(), ['pending'])
+        self.assertEqual(self.states(), ['failed'])
 
     def test_old_jobs_are_not_answered(self):
         self.enqueue()
@@ -322,6 +342,71 @@ class CatalogAndPolicyTests(unittest.TestCase):
 
     def test_prompt_asks_for_direct_answers_and_keeps_transaction_on_funpay(self):
         prompt = self.p.DEFAULT_INSTRUCTIONS
-        for phrase in ('1–4 короткими', 'Не спрашивай повторно', 'ОДИН нужный вопрос',
+        for phrase in ('полный полезный ответ', 'не спрашивай уже известное', 'ОДИН нужный вопрос',
                        'только на FunPay', 'до полного получения', 'провайдера или модели'):
             self.assertIn(phrase, prompt)
+
+
+class EfficientContextTests(unittest.TestCase):
+    def setUp(self):
+        CatalogAndPolicyTests.setUp(self)
+        self.card.account.get_chat = Mock(return_value=SimpleNamespace(id=123, looking_link='/lots/offer?id=100'))
+        self.job = dict(seller=10, buyer=20, chat='123', message=1)
+        self.p._set('enabled', '1')
+        self.p._set('model', 'synthetic-model')
+        self.p._key = lambda: 'synthetic-key'
+        with self.p._db() as conn:
+            conn.execute('INSERT INTO history VALUES (?,?,?,?,?)', (10,'123','user','Можно купить этот плагин?', self.p.time.time()))
+
+    def test_exact_current_lot_is_used_instead_of_unrelated_rentals(self):
+        rental = SimpleNamespace(id=300, description='Аренда игры 24 часа', price=25, html='25 ₽', subcategory=self.lots[0].subcategory)
+        self.lots.append(rental)
+        messages = self.p._messages(self.card, self.job)
+        payload = messages[0]['content']
+        self.card.account.get_chat.assert_called_once_with(123)
+        self.assertIn('100 Telegram Stars', payload)
+        self.assertIn('current_product', payload)
+        self.assertNotIn('Аренда игры 24 часа', payload)
+        self.assertLessEqual(self.p._input_bytes(messages), self.p._MAX_INPUT_BYTES)
+
+    def test_unrelated_shop_catalog_does_not_fill_an_ambiguous_question(self):
+        self.card.account.get_chat.return_value.looking_link = None
+        self.lots[0].description = 'Аренда игры 1'
+        self.lots[1].description = 'Аренда игры 2'
+        messages = self.p._messages(self.card, self.job)
+        self.assertNotIn('Аренда игры 1', messages[0]['content'])
+        self.assertNotIn('Аренда игры 2', messages[0]['content'])
+        self.assertIn('не угадывай товар', messages[0]['content'])
+
+    def test_foreign_looking_link_never_becomes_current_product(self):
+        for url in ('https://evil.com/lots/offer?id=100', 'https://funpay.com@evil.com/lots/offer?id=100'):
+            self.card.account.get_chat.return_value.looking_link = url
+            self.assertIsNone(self.p._current_product(self.card, '123'))
+
+    def test_large_history_keeps_current_question_and_fits_input_budget(self):
+        self.p._set('knowledge', 'Полезные правила. ' * 500)
+        with self.p._db() as conn:
+            conn.execute('DELETE FROM history')
+            for index in range(8):
+                conn.execute('INSERT INTO history VALUES (?,?,?,?,?)', (10, '123', 'assistant', 'Старая история ' * 500, self.p.time.time()))
+            conn.execute('INSERT INTO history VALUES (?,?,?,?,?)', (10, '123', 'user', 'Можно купить этот плагин?', self.p.time.time()))
+        messages = self.p._messages(self.card, self.job)
+        self.assertLessEqual(self.p._input_bytes(messages), self.p._MAX_INPUT_BYTES)
+        self.assertEqual(messages[-1]['content'], 'Можно купить этот плагин?')
+
+    def test_greeting_has_no_shop_context(self):
+        with self.p._db() as conn:
+            conn.execute("UPDATE history SET text='Привет'")
+        messages = self.p._messages(self.card, self.job)
+        self.card.account.get_user.assert_not_called()
+        self.assertNotIn('100 Telegram Stars', messages[0]['content'])
+
+    def test_actual_usage_is_recorded_without_secret_content(self):
+        self.p._record_usage(self.job, 'model', 1234,
+            {'prompt_tokens': 200, 'completion_tokens': 80, 'total_tokens': 280,
+             'completion_tokens_details': {'reasoning_tokens': 20}, 'secret': 'must-not-store'}, 'received')
+        with self.p._db() as conn:
+            row = conn.execute('SELECT * FROM api_usage').fetchone()
+        self.assertEqual(json.loads(row['usage'])['total_tokens'], 280)
+        self.assertEqual(json.loads(row['usage'])['completion_tokens_details']['reasoning_tokens'], 20)
+        self.assertNotIn('must-not-store', row['usage'])
